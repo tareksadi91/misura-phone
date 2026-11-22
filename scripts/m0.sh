@@ -61,7 +61,9 @@ row 12 "Routine save" "$(pass '[[ $text == *Saved* || $text == *saved* ]]') at=$
 a am start -a android.settings.SETTINGS >/dev/null; n3=$(notes)
 for _ in $(seq 1 90); do sleep 4; [ "$(new "$n3" "$(notes)")" -ge 1 ] && break; done
 n4=$(notes);                                      k=$(new "$n3" "$n4"); row 13 "Routine run" "$(pass '[ "$k" -ge 1 ]') new result alerts: $k"
-ask "Remove the routine you just set up"; tap Remove; sleep 4
+ask "Remove the routine that runs every day at $at"
+for _ in $(seq 1 30); do text=$(screen); [[ $text == *'"Remove"'* ]] && break; sleep 2; done   # the card can follow a list step
+tap Remove; sleep 4
 ask "List my routines";                           row 14 "Routine remove" "$(pass '[[ $text == *"0 routines"* ]]') $(echo "$text" | cut -c1-160)"
 a input keyevent KEYCODE_HOME
 echo; echo "Hand tasks 15–20: see docs/M0.md. Detail: detail.md" >> "$out"

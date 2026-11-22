@@ -56,8 +56,14 @@ class DebugReceiver : BroadcastReceiver() {
                     }
                     "about" -> ctx.getSharedPreferences("brain", Context.MODE_PRIVATE)
                         .putPrivateString(ABOUT_KEY, runCatching { String(android.util.Base64.decode(i.getStringExtra("value64").orEmpty(), android.util.Base64.DEFAULT)) }.getOrDefault(""))
-                    "sa" -> ctx.getSharedPreferences("brain", Context.MODE_PRIVATE)
-                        .putPrivateString(SA_KEY, runCatching { String(android.util.Base64.decode(i.getStringExtra("value64").orEmpty(), android.util.Base64.DEFAULT)) }.getOrDefault(""))
+                    "sa" -> ctx.getSharedPreferences("brain", Context.MODE_PRIVATE).let { prefs ->
+                        val sa = runCatching { String(android.util.Base64.decode(i.getStringExtra("value64").orEmpty(), android.util.Base64.DEFAULT)) }.getOrDefault("")
+                        synchronized(prefs) {
+                            prefs.putPrivateString(SA_KEY, sa)
+                            // A pushed key is the active one: a service account selects Vertex (other providers' keys stay saved).
+                            if (sa.isNotBlank()) prefs.edit().putString("model_provider", com.misura.phone.brain.ModelProvider.VERTEX.name).commit()
+                        }
+                    }
                     "hand_think", "main_think", "hand_model" -> {
                         val cmd = i.getStringExtra("cmd")!!; val key = when (cmd) { "hand_think" -> HAND_THINK_KEY; "main_think" -> MAIN_THINK_KEY; else -> HAND_MODEL_KEY }
                         val v = i.getStringExtra("value").orEmpty().trim().let { if (cmd == "hand_model") it else it.uppercase() }
@@ -70,6 +76,19 @@ class DebugReceiver : BroadcastReceiver() {
                         Log.i("MisuraAgent", "switch $cmd = ${if (v.isEmpty() || v.equals("off", true)) "off (default)" else v}")
                     }
                     "exa" -> ctx.getSharedPreferences("brain", Context.MODE_PRIVATE).putPrivateString(EXA_KEY, i.getStringExtra("value").orEmpty())
+                    "apikey", "searchkey" -> {
+                        val cmd = i.getStringExtra("cmd")!!
+                        val name = i.getStringExtra("provider").orEmpty().uppercase()
+                        val known = (com.misura.phone.brain.ModelProvider.entries.map { it.name } + com.misura.phone.brain.SearchProvider.entries.map { it.name }).let { if (name in it) name else "unknown" }
+                        val settings = com.misura.phone.setup.CredentialSettings(ctx.getSharedPreferences("brain", Context.MODE_PRIVATE))
+                        val saved = runCatching {
+                            val value = requireNotNull(i.getStringExtra("value"))
+                            if (cmd == "apikey") settings.importApiKey(com.misura.phone.brain.ModelProvider.valueOf(name), value)
+                            else settings.importSearchKey(com.misura.phone.brain.SearchProvider.valueOf(name), value)
+                        }.isSuccess
+                        // Fixed words only: never the value, the intent or the exception (it could carry input).
+                        Log.i("MisuraDebug", "$cmd $known: ${if (saved) "saved and selected" else "rejected, nothing changed"}")
+                    }
                     "notes" -> ctx.getSharedPreferences("brain", Context.MODE_PRIVATE).let { p ->
                         if (i.getStringExtra("clear") == "yes") p.edit().remove(com.misura.phone.brain.NOTES_KEY).apply()
                         Log.i("MisuraDebug", "notes: ${com.misura.phone.brain.notes(p).size}") // the count only: notes are personal

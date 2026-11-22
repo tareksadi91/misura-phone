@@ -29,6 +29,8 @@ Use Android Studio and JDK 21. Run these from `misura-app`:
 
 `:core:test` covers pure JVM logic. App unit tests include Robolectric. Add a focused regression test for changed logic, preferably in the existing suite.
 
+Before reporting a behavior change delivered, run M0 on a real phone: [docs/M0.md](docs/M0.md) (`bash scripts/m0.sh <dir outside the repo>`, then the hand tasks). New features add their M0 task in the same pull request.
+
 Static publication checks can run without Gradle: `python3 scripts/check-oss.py` from the repository root. Run checker regression mutations with `python3 scripts/test-check-oss.py`. Checks enforce source-manifest component/permission allowlists and reviewed main-source logging lines, plus normalized digests of known private identifiers. Changed logging requires fresh review before updating its line digest. They never read local credential files and do not certify arbitrary secrets, Kotlin dataflow, merged manifests or private history. Android tests and release APK inspection remain separate checks.
 
 For Android tests, start your configured AVD (the existing setup calls it `misura_test`):

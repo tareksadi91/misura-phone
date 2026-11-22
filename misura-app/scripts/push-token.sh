@@ -5,8 +5,9 @@
 # Usage: scripts/push-token.sh   (Ctrl-C to stop). Clear it: adb shell am broadcast -n com.misura.phone/.debug.DebugReceiver --es cmd token --es value ""
 push="$(dirname "$0")/../../scripts/push-secret.sh"
 while true; do
-  gcloud auth application-default print-access-token 2>/dev/null | bash "$push" token >/dev/null \
-    || { echo "Token push failed (gcloud sign-in needed? gcloud auth application-default login; ANDROID_SERIAL set?)"; exit 1; }
+  T=$(gcloud auth application-default print-access-token 2>/dev/null) || { echo "gcloud sign-in needed: gcloud auth application-default login"; exit 1; }
+  printf '%s' "$T" | bash "$push" token >/dev/null || { echo "Token push failed (ANDROID_SERIAL set? phone connected?)"; exit 1; }
+  T=
   echo "$(date +%H:%M) token pushed"
   if [ -n "${PROJECT:-}" ]; then
     adb shell am broadcast -n com.misura.phone/.debug.DebugReceiver --es cmd project --es value "$PROJECT" >/dev/null

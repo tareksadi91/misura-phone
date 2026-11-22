@@ -323,6 +323,72 @@ class HiddenChatTest {
         b.offered.last() shouldBe "(no scroll)"
     }
 
+    /** A model whose replies come from [steps] in order; counts its calls and keeps the screens it was shown. */
+    private class Planner(val steps: List<(String) -> Pair<String, JsonObject>>) : com.misura.core.agent.Brain {
+        val told = mutableListOf<String>()
+        override suspend fun next(system: String, turns: List<com.misura.core.agent.Turn>, tools: List<com.misura.core.agent.ToolSpec>): com.misura.core.agent.BrainReply {
+            val t = turns.last().content.toString(); told += t
+            val (name, a) = steps[minOf(told.size - 1, steps.lastIndex)](t)
+            return com.misura.core.agent.BrainReply.Calls(kotlinx.serialization.json.buildJsonObject {}, listOf(com.misura.core.agent.ToolCall(null, name, a)))
+        }
+    }
+    private fun stepsOf(vararg s: JsonObject) = kotlinx.serialization.json.buildJsonObject { put("actions", kotlinx.serialization.json.JsonArray(s.toList())) }
+
+    /** Speed batching: one steps call opens the search page by label, types into its field by label and presses enter; the next model call already sees the result. */
+    @Test fun stepsCrossScreensInOneModelCall(): Unit = runBlocking {
+        val b = Planner(listOf(
+            { _ -> "steps" to stepsOf(args("tool" to "tap", "label" to "Search form"), args("tool" to "type", "label" to "Search", "text" to "lamp"), args("tool" to "key", "name" to "enter")) },
+            { _ -> "done" to args("result" to "ok") }))
+        val r = mk(b, maxActions = 6).run(goal()) { }
+        check(r["error"] == null) { r.toString() + b.told }
+        b.told.size shouldBe 2                                               // old source: "unknown tool steps", and the search never ran
+        check("Status: searched lamp" in b.told[1]) { b.told[1] }
+    }
+
+    /** Enter on typed words in a form (a submit) never runs inside steps: nothing goes out, no card, the model is told to do it on its own. */
+    @Test fun stepsNeverPassTheApprovalGate(): Unit = runBlocking {
+        val b = Planner(listOf(
+            { t -> "tap" to args("i" to at(t, "Note form")) },
+            { t -> "steps" to stepsOf(args("tool" to "type", "i" to fieldAt(t), "text" to "hello"), args("tool" to "key", "name" to "enter")) },
+            { _ -> "done" to args("result" to "ok") }))
+        val r = mk(b, maxActions = 6).run(goal()) { }
+        r["askUser"] shouldBe null
+        check("never runs inside steps" in b.told.last()) { b.told.last() }
+        check("Status: none" in b.told.last()) { b.told.last() }             // not submitted
+    }
+
+    /** A later step whose label is not on the next screen stops the steps; nothing is tapped and the model sees why. */
+    @Test fun aMissingStepLabelStopsTheSteps(): Unit = runBlocking {
+        val b = Planner(listOf(
+            { _ -> "steps" to stepsOf(args("tool" to "tap", "label" to "Search form"), args("tool" to "tap", "label" to "Zebra button")) },
+            { _ -> "done" to args("result" to "ok") }))
+        mk(b, maxActions = 6).run(goal()) { }
+        check("steps stopped before step 2 of 2: no element" in b.told.last() && "Zebra button" in b.told.last()) { b.told.last() }   // screen text reaches the model JSON-escaped
+    }
+
+    /** Words said while the model planned the steps stop them before the next one touches anything. */
+    @Test fun newWordsStopQueuedSteps(): Unit = runBlocking {
+        lateinit var hand: com.misura.phone.hands.UseApp
+        val b = Planner(listOf(
+            { _ -> hand.steer("no, open the shop instead"); "steps" to stepsOf(args("tool" to "tap", "label" to "Search form"), args("tool" to "type", "label" to "Search", "text" to "lamp"), args("tool" to "key", "name" to "enter")) },
+            { _ -> "done" to args("result" to "ok") }))
+        hand = mk(b, maxActions = 6)
+        hand.run(goal()) { }
+        check("the user said something new" in b.told.last()) { b.told.last() }
+        check("tapped" !in b.told.last()) { b.told.last() }                  // not even step 1 ran (Codex review P1)
+        check("Status: searched" !in b.told.last()) { b.told.last() }
+    }
+
+    /** A type step without text is refused before anything runs, instead of clearing the field (Codex review). */
+    @Test fun aTypeStepNeedsText(): Unit = runBlocking {
+        val b = Planner(listOf(
+            { t -> "tap" to args("i" to at(t, "Search form")) },
+            { t -> "steps" to stepsOf(args("tool" to "type", "i" to fieldAt(t)), args("tool" to "key", "name" to "enter")) },
+            { _ -> "done" to args("result" to "ok") }))
+        mk(b, maxActions = 6).run(goal()) { }
+        check("type needs text" in b.told.last()) { b.told.last() }
+    }
+
     /** Leaving the screen gives scroll-down back (no lasting friction). */
     @Test fun aChangedScreenGivesTheScrollDirectionBack(): Unit = runBlocking {
         var k = 0

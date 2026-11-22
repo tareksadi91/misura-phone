@@ -112,6 +112,18 @@ private val ACTIONS = listOf(
     ToolSpec("fail", "The goal can't be reached.", schema("reason" to "string", required = listOf("reason"))),
 )
 
+/** The tools for one round: a direction that moved nothing on this screen ([stuck]: true = up, false = down) is left out of scroll; both: no scroll at all. */
+internal fun actionsFor(stuck: Set<Boolean>): List<ToolSpec> = when (stuck.size) {
+    0 -> ACTIONS
+    2 -> ACTIONS.filter { it.name != "scroll" }
+    else -> ACTIONS.map {
+        if (it.name != "scroll") it else {
+            val (off, on) = if (true in stuck) "up" to "down" else "down" to "up"
+            ToolSpec("scroll", "Scroll the page: $on only (scrolling $off moved nothing on this screen).", it.parameters)
+        }
+    }
+}
+
 /**
  * The general hand: works any app on the hidden display by reading its screen and tapping, until the goal is met.
  * Each action shows on the step line as it happens ("Clock: tap “Alarm”"); the words come from the app's screen.
@@ -385,7 +397,13 @@ class UseApp(
                 if (count != null && things.size >= count && !heardMore(heard, seenWords) && synchronized(lock) { heard.isEmpty() }) keepItems().let { out(buildJsonObject { put("result", "recorded ${things.size} thing${if (things.size == 1) "" else "s"}"); put("actions", did.size) }) } else null
             /** The asked number still stands: it stops applying once the user has said anything into this run. */
             fun counting() = count != null && synchronized(lock) { heard.isEmpty() }
-            var backed = false; var relaunched = false; var scrolledFrom: String? = null
+            var backed = false; var relaunched = false; var scrolledFrom: String? = null; var scrolledUp = false
+            // A scroll that moved nothing: that direction is taken away while this exact screen stays (words + places), the other one stays.
+            // Any change on screen (a tap, the other direction, late loading) gives it back. Never a reason to call done.
+            // Both directions are kept (Codex review): with only the last one, a static page let the model alternate down/up to the step limit.
+            val stuck = mutableSetOf<Boolean>(); var stuckAt: String? = null // true = up moved nothing, false = down
+            fun unstick(now: String) { if (stuck.isNotEmpty() && now != stuckAt) { stuck.clear(); stuckAt = null } }
+            fun fingerprint(seen: List<Seen>) = seen.joinToString("\n") { x -> x.words + x.bounds.toList() }
             repeat(maxActions) { n ->
                 if (late()) return gaveUp("took too long")
                 val t0 = System.nanoTime()
@@ -408,7 +426,18 @@ class UseApp(
                 backed = false; resumed = false
                 val seen = look.seen
                 // A scroll that left the same words in the same places moved nothing (words alone: a list of same-named tiles looked stuck, Codex P2): say so, or the model scrolls on to the end of its steps.
-                scrolledFrom?.let { if (it == seen.joinToString("\n") { x -> x.words + x.bounds.toList() }) did[did.lastIndex] = did.last() + ": nothing moved (end of the page, or nothing to scroll here); try search or back"; scrolledFrom = null }
+                val onScreen = fingerprint(seen)
+                unstick(onScreen)
+                scrolledFrom?.let {
+                    if (it == onScreen) {
+                        stuck += scrolledUp; stuckAt = onScreen
+                        did[did.lastIndex] = did.last() + ": nothing moved (end of the page, or nothing to scroll here); " +
+                            (if (stuck.size == 2) "scroll is off in both directions until the screen changes. Try search or back"
+                            else "scrolling ${if (scrolledUp) "up" else "down"} is off until the screen changes. Try ${if (scrolledUp) "down" else "up"}, search or back") +
+                            ", or call done if the answer is on screen"
+                    }
+                    scrolledFrom = null
+                }
                 val screenMs = ms(t0); val nodes = look.root.count { true }
                 val words = synchronized(lock) { heard.toList() }
                 if (words.size > told) { told = words.size; note("$app: got it, adjusting") }
@@ -420,7 +449,7 @@ class UseApp(
                 // A network blip is tried once more after 1.5 s; sign-in and 4xx errors are not blips.
                 for (attempt in 0..1) {
                     try {
-                        reply = withTimeoutOrNull((deadline - System.nanoTime()) / 1_000_000 + SAFETY_MS / 2) { brain.next(PROMPT, turns, ACTIONS) }
+                        reply = withTimeoutOrNull((deadline - System.nanoTime()) / 1_000_000 + SAFETY_MS / 2) { brain.next(PROMPT, turns, actionsFor(stuck)) }
                         blip = null; break
                     } catch (e: BrainError) {
                         if (e.auth || !(e.code == "network" || (e.code.toIntOrNull() ?: 0) >= 500)) throw e
@@ -614,7 +643,19 @@ class UseApp(
                         }
                         else -> "unknown key"
                     }
-                    "scroll" -> { scrolledFrom = seen.joinToString("\n") { it.words + it.bounds.toList() }; val up = c.args.str("direction") == "up"; HiddenInput.swipe(s, W / 2, if (up) H / 3 else H * 2 / 3, W / 2, if (up) H * 2 / 3 else H / 3); "scrolled ${if (up) "up" else "down"}" }
+                    "scroll" -> run {
+                        val up = c.args.str("direction") == "up"
+                        // The baseline is read now, not taken from before the model call: the app may have moved meanwhile (restored a list
+                        // position, loaded more), and a real move from there must not count as "nothing moved" (Codex review).
+                        val before = ScreenReader.read(s)?.let { fingerprint(flatten(it, W, H)) } ?: return@run "the screen can't be read right now; look again"
+                        if (late()) return gaveUp("took too long") // the extra read can cross the budget (Codex re-check)
+                        unstick(before)
+                        // Taken away from the tools, but a model can still name it: refused here too, nothing swiped.
+                        if (up in stuck) return@run "not done: scrolling ${if (up) "up" else "down"} moved nothing on this screen; try ${if (stuck.size == 2) "search" else if (up) "down, search" else "up, search"} or back, or call done if the answer is on screen"
+                        // Only a swipe that went through can prove "nothing moved"; a rejected one must not take the direction away (Codex re-check).
+                        if (!HiddenInput.swipe(s, W / 2, if (up) H / 3 else H * 2 / 3, W / 2, if (up) H * 2 / 3 else H / 3)) return@run "scroll ${if (up) "up" else "down"} did not go through"
+                        scrolledFrom = before; scrolledUp = up; "scrolled ${if (up) "up" else "down"}"
+                    }
                     "wait" -> { delay(1000); "waited" }
                     // ponytail: a note costs a whole round (~4 s); let tap/key carry one if research jobs get slow.
                     "note" -> c.args.str("text")?.take(400)?.let { found += it; "noted: $it" } ?: "nothing to note"

@@ -275,6 +275,63 @@ class HiddenChatTest {
         made["items"] shouldBe null
     }
 
+    /** A model that keeps scrolling down while the tools offer it (task 10 on the phone: two scrolls on a page that did not move). Records each round's scroll tool. */
+    private class Scroller(val first: (String) -> Pair<String, JsonObject>, val then: (String, Boolean) -> Pair<String, JsonObject>) : com.misura.core.agent.Brain {
+        val offered = mutableListOf<String>(); val told = mutableListOf<String>(); var n = 0
+        override suspend fun next(system: String, turns: List<com.misura.core.agent.Turn>, tools: List<com.misura.core.agent.ToolSpec>): com.misura.core.agent.BrainReply {
+            val t = turns.last().content.toString(); told += t
+            val scroll = tools.firstOrNull { it.name == "scroll" }?.description ?: "(no scroll)"; offered += scroll
+            val (name, a) = if (n++ == 0) first(t) else then(t, "down or up" in scroll)
+            return com.misura.core.agent.BrainReply.Calls(kotlinx.serialization.json.buildJsonObject {}, listOf(com.misura.core.agent.ToolCall(null, name, a)))
+        }
+    }
+
+    /** Speed A: a scroll down that moved nothing takes scroll-down away on that screen, so the run ends instead of scrolling out its steps. Up stays. */
+    @Test fun aScrollThatMovedNothingIsTakenAwayInThatDirection(): Unit = runBlocking {
+        val b = Scroller({ "tap" to args("i" to at(it, "Shop")) }) { _, down -> if (down) "scroll" to args("direction" to "down") else "done" to args("result" to "Red lamp 30 €") }
+        val r = mk(b, maxActions = 4).run(goal()) { }
+        check(r["error"] == null) { r.toString() }                        // old source: "didn't finish in 4 steps"
+        check(b.offered.last().startsWith("Scroll the page: up only")) { b.offered }
+        check("scrolling down is off until the screen changes" in b.told.last()) { b.told.last() }
+    }
+
+    /** The model names the taken-away direction anyway: nothing is swiped, it is told why. */
+    @Test fun aScrollInTheStuckDirectionIsRefused(): Unit = runBlocking {
+        val b = Scroller({ "tap" to args("i" to at(it, "Shop")) }) { t, _ -> if ("not done: scrolling down moved nothing" in t) "done" to args("result" to "ok") else "scroll" to args("direction" to "down") }
+        val r = mk(b, maxActions = 5).run(goal()) { }
+        check(r["error"] == null) { r.toString() }
+        check(b.told.any { "not done: scrolling down moved nothing" in it }) { b.told }
+    }
+
+    /** Both directions moved nothing on the same screen: both stay off, so the model can't alternate down/up until the budget runs out (Codex review P2). */
+    @Test fun bothStuckDirectionsStayOffTogether(): Unit = runBlocking {
+        val b = Scroller({ "tap" to args("i" to at(it, "Shop")) }) { _, _ -> error("unused") }
+        val brain = object : com.misura.core.agent.Brain by b {
+            override suspend fun next(system: String, turns: List<com.misura.core.agent.Turn>, tools: List<com.misura.core.agent.ToolSpec>): com.misura.core.agent.BrainReply {
+                if (b.n == 0) return b.next(system, turns, tools)
+                val scroll = tools.firstOrNull { it.name == "scroll" }?.description; b.offered += scroll ?: "(no scroll)"; b.n++
+                val (name, a) = when {
+                    scroll == null -> "done" to args("result" to "Red lamp 30 €")
+                    "down or up" in scroll || "down only" in scroll -> "scroll" to args("direction" to "down")
+                    else -> "scroll" to args("direction" to "up")
+                }
+                return com.misura.core.agent.BrainReply.Calls(kotlinx.serialization.json.buildJsonObject {}, listOf(com.misura.core.agent.ToolCall(null, name, a)))
+            }
+        }
+        val r = mk(brain, maxActions = 6).run(goal()) { }
+        check(r["error"] == null) { r.toString() + b.offered }               // one-direction memory: down, up, down, up… out of steps
+        b.offered.last() shouldBe "(no scroll)"
+    }
+
+    /** Leaving the screen gives scroll-down back (no lasting friction). */
+    @Test fun aChangedScreenGivesTheScrollDirectionBack(): Unit = runBlocking {
+        var k = 0
+        val b = Scroller({ "tap" to args("i" to at(it, "Shop")) }) { _, _ -> when (k++) { 0, 1 -> "scroll" to args("direction" to "down"); 2 -> "key" to args("name" to "back"); else -> "done" to args("result" to "ok") } }
+        val r = mk(b, maxActions = 6).run(goal()) { }
+        check(r["error"] == null) { r.toString() }
+        check(b.offered.last().startsWith("Scroll the page: down or up")) { b.offered }   // back on the list page: both again
+    }
+
     private fun decodeItemPhoto(path: String): android.graphics.Bitmap? =
         com.misura.phone.store.StorageCipher.shared.decrypt(java.io.File(path).readBytes())?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }
 

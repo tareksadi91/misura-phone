@@ -91,6 +91,28 @@ class CredentialSettings(private val prefs: SharedPreferences, private val ciphe
         saveConfiguration(CredentialInput(provider, model, apiKey, "", raw(PROJECT).orEmpty(), "", searchProvider()))
     }
 
+    /** Debug adb import (a setup agent, so nobody types a key on the phone): stores one model API key and selects
+     *  that provider. Nothing else changes; blank never means keep or clear. An open settings form saved later wins. */
+    fun importApiKey(provider: ModelProvider, value: String) = synchronized(prefs) {
+        require(provider != ModelProvider.VERTEX) { "Vertex uses a service account." }
+        importKey(apiKey(provider), "model_provider", provider.name, value)
+    }
+
+    /** Same for a web-search key: stores it and selects that search service; the model choice is untouched. */
+    fun importSearchKey(provider: SearchProvider, value: String) = synchronized(prefs) {
+        require(provider != SearchProvider.NATIVE) { "Native search has no key." }
+        importKey(searchKey(provider), "search_provider", provider.name, value)
+    }
+
+    private fun importKey(name: String, selection: String, selected: String, value: String) {
+        require(value.isNotEmpty() && value.length <= 2048 && value.all { it.code in 33..126 }) { "Keys must be a single line without spaces." }
+        val before = listOf(name, selection).associateWith(::raw)
+        if (!prefs.edit().putString(name, cipher.encrypt(value)).putString(selection, selected).commit()) {
+            val undo = prefs.edit(); before.forEach { (k, v) -> if (v == null) undo.remove(k) else undo.putString(k, v) }; undo.commit()
+            error("Could not save credentials. Try again.")
+        }
+    }
+
     fun saveConfiguration(input: CredentialInput): Unit = synchronized(prefs) {
         val p = input.provider
         val search = input.searchProvider

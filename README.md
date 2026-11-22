@@ -45,7 +45,7 @@ Build and sideload an APK for testing. Store distribution and current accessibil
 
 ## Run it yourself
 
-1. You need a phone on Android 14 (API 34) or later. Install Android Studio, its Android SDK and platform tools (`adb`), and JDK 21. Point `JAVA_HOME` at JDK 21. Clone `misura-phone` and open `misura-app` in Android Studio; install the SDK components requested by the project.
+1. You need a phone on Android 14 (API 34) or later. Install Android Studio, its Android SDK and platform tools (`adb`), and JDK 21. Point `JAVA_HOME` at JDK 21. Clone `misura-phone` and open `misura-app` in Android Studio; install the SDK components requested by the project (the build needs compileSdk 37). Building from a terminal or a coding agent also needs the installed SDK's location: set `ANDROID_HOME` (Android Studio's default is `~/Library/Android/sdk` on macOS, `~/Android/Sdk` on Linux, `%LOCALAPPDATA%\Android\Sdk` on Windows) or put `sdk.dir=` in the ignored `misura-app/local.properties`.
 
 2. Bring one Gemini, OpenAI or Anthropic API key, or use Vertex with Google Cloud credentials. Google Cloud is optional for API-key model routes; direct Google services need their own Cloud access. For Vertex, prefer a short-lived token or a dedicated service-account JSON key with only the access required for Vertex/Places. Use your own project with billing, spending limits and Vertex AI/Places access. The project defaults to the key's `project_id`; local setup can explicitly override it. For the adb-token route set `PROJECT` below. Do not relax an organization's key policy. Setup in a separate contributor's Cloud project is **UNVERIFIED**.
 
@@ -53,6 +53,7 @@ Build and sideload an APK for testing. Store distribution and current accessibil
 
    ```sh
    cd misura-app
+   export ANDROID_HOME="$HOME/Library/Android/sdk"   # your SDK path; skip if local.properties sets sdk.dir
    ./gradlew :app:assembleDebug
    adb devices
    export ANDROID_SERIAL=YOUR_PHONE_SERIAL
@@ -61,7 +62,7 @@ Build and sideload an APK for testing. Store distribution and current accessibil
 
 4. Open Misura. A fresh install opens **Misura settings**: choose your model provider, edit the model ID if needed and enter its key. For Vertex, paste your service-account JSON and optionally enter a billing project. Google Cloud is an optional integration for other model providers. Leave Web search on Native to use the model account, or select Exa, Tavily or Context.dev and enter its separate key. Without Google Cloud, places requests use an installed Maps app. Browser and Maps fallback depend on installed apps, readable screens and sign-in. Tap **Save keys**. Leave secret fields blank to keep saved keys; stored keys are never displayed. Reopen settings by swiping down for apps and tapping **Misura settings** before typing a search. The form has native permission links and a notification block editor; no adb is needed for these settings. Validation is offline, so a saved key is not proof of Cloud access. Short-lived-token debug provisioning is still available below.
 
-   Install Shizuku on the phone. The tested setup used the `thedjchi` fork v13.7.0; other versions are **UNVERIFIED** here. Enable Developer options → Wireless debugging, then use Shizuku's Pair flow and Start. Enable Start on boot and Watchdog if provided. Return to **Misura settings** and tap **Connect Shizuku** to grant access. Debug probe screens still require an adb shell launch. The tested fork restarted after reboot; recheck this on your phone.
+   Install Shizuku on the phone. The tested setup used the `thedjchi` fork v13.7.0; other versions are **UNVERIFIED** here. Enable Developer options → Wireless debugging, then use Shizuku's Pair flow and Start. Enable Start on boot and Watchdog if provided. With the phone on USB, the tested fork can also be started from the computer: run its installed `libshizuku.so` over `adb shell`. Find it from the installed package, not another phone: the directory of the `base.apk` path from `adb shell pm path moe.shizuku.privileged.api`, then `lib/<abi>/libshizuku.so`, where `<abi>` comes from the package's `primaryCpuAbi` in `adb shell dumpsys package moe.shizuku.privileged.api` (`arm64-v8a` → `arm64`, `armeabi-v7a` → `arm`). Paths contain `==`; keep them intact. On the Android 17 test phone `dumpsys` listed only `legacyNativeLibraryDir`, not `nativeLibraryDir`. Check the file exists before running it; this route is tested only with the fork named above. Return to **Misura settings** and tap **Connect Shizuku** to grant access. Debug probe screens still require an adb shell launch. The tested fork restarted after reboot; recheck this on your phone.
 
 5. Use **Misura settings** to grant notification access, enable app control/accessibility, and allow voice/alerts. Contacts/calendar read permissions are optional. Android may require App info → Allow restricted settings before enabling accessibility. This settings screen requests calendar read access only. The app declares calendar write permission for separately authorized event creation. Alternatively, these adb commands also grant microphone and notification permissions and allow the sleep overlay:
 
@@ -77,6 +78,8 @@ Build and sideload an APK for testing. Store distribution and current accessibil
 
    Allow restricted settings for Misura if Android requires it. Set battery use to Unrestricted for Misura and Shizuku. Grant any target app's location or contacts permission by hand: system permission dialogs cannot be read on the hidden display.
 
+   Phones with a vendor side/action key that Android reports without a standard key code (for example the Nothing Phone (3a) Essential Key): with app control enabled, press and release it once on Misura home. Misura remembers that key and drops the **Hold to talk** button; then hold the key and say a harmless request to check voice. Keys that send a standard key code are not learned, and Hold to talk stays.
+
    Notification sources work immediately. Optionally block one exact package (debug build):
 
    ```sh
@@ -85,7 +88,7 @@ Build and sideload an APK for testing. Store distribution and current accessibil
 
    Use `--ez blocked false` to restore it. No wildcards. Existing opt-in preferences are ignored on upgrade. All builds default to all packages; **Misura settings** lists posting and saved blocked apps for toggling. `-Pfast` disables Android app debugging, automatic agent content logs (it keeps content-free timing lines: package, counts, milliseconds) and raw notification-extra collection; debug-variant provisioning and metadata probes remain enabled. Exported diagnostic components still require `DUMP`. Shell-invoked diagnostics and exports can still contain private task/message content, including in fast builds. Release builds omit those components.
 
-6. Tap **Use Misura as home** in local settings, or use adb:
+6. After a first read-only request works (step 8), tap **Use Misura as home** in local settings, or use adb:
 
    ```sh
    adb shell cmd package set-home-activity com.misura.phone/.HomeActivity
@@ -98,15 +101,16 @@ Build and sideload an APK for testing. Store distribution and current accessibil
    PROJECT=YOUR_GCP_PROJECT_ID sh scripts/push-token.sh
    ```
 
-   Skip this step if you use a Gemini, OpenAI or Anthropic API key, or already saved a service-account key in local settings. A project saved in local settings takes precedence over `PROJECT`. For the token route, this refreshes until stopped with Ctrl-C. Alternatively, return to the repo root and push your dedicated service-account key over adb. Optionally push a plain-text briefing:
+   Skip this step if you use a Gemini, OpenAI or Anthropic API key, or already saved a service-account key in local settings. A project saved in local settings takes precedence over `PROJECT`. For the token route, this refreshes until stopped with Ctrl-C. Alternatively, return to the repo root and push your dedicated service-account key or an Exa key over adb instead of typing it on the phone (debug builds; needs Python 3 and `ANDROID_SERIAL`). Prefer a downloaded key file; the clipboard route clears the clipboard afterwards but cannot clear a clipboard manager's history. Optionally push a plain-text briefing:
 
    ```sh
    cd ..
-   sh scripts/push-key.sh /absolute/path/to/your-service-account.json
+   bash scripts/push-secret.sh sa < /absolute/path/to/your-service-account.json   # same as scripts/push-key.sh <file>
+   ( trap 'pbcopy </dev/null' EXIT; pbpaste | bash scripts/push-secret.sh exa )   # macOS: Exa key copied to clipboard
    sh scripts/push-about.sh /absolute/path/to/your-briefing.md
    ```
 
-   Keep both files outside version control or name them `*.local.*` (ignored). Scripts accept explicit paths; no sample credentials are included. Do not use shell tracing: adb provisioning passes credentials through process arguments. The briefing uses its first 6,000 characters. Native web lookup uses the selected model provider. The optional legacy Exa credential can also be set through the shell-protected `exa` debug command. The adb commands target debug builds; the local setup form and notification block editor are available in all builds.
+   Keep these files outside version control or name them `*.local.*` (ignored). Scripts accept explicit paths; no sample credentials are included. `push-secret.sh` and `push-token.sh` send credentials over stdin, so they stay out of this computer's process arguments and are never printed; on the phone they still pass through `am` arguments, visible to adb shell/root. Do not use shell tracing. There is no adb setter for Gemini, OpenAI, Anthropic, Tavily or Context.dev keys: enter those in Misura settings. Pushing a key does not select it: check the provider and web-search choice in Misura settings, reopen it to see **Saved**, then prove access with a real request. The briefing uses its first 6,000 characters. Native web lookup uses the selected model provider. The adb commands target debug builds; the local setup form and notification block editor are available in all builds.
 
 8. Try a read-only request first, such as finding places. For tests, start an emulator, prepare Shizuku and permissions there too, and install the fake chat app. Example AVD name: `misura_test` (create it first):
 

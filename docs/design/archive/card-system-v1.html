@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --screen: oklch(0.13 0.004 60);
+    --surface: oklch(0.31 0.005 60);
+    --paper: oklch(0.95 0.003 90);
+    --ink: oklch(0.17 0.004 60);
+    --text: oklch(0.95 0.003 90);
+    --text-2: oklch(0.74 0.004 60);
+    --o: oklch(0.66 0.21 40);
+    --page: oklch(0.92 0.004 90);
+    --R: 17px; --m: 6px; --p: 6px;
+    --card-r: calc(var(--R) - var(--m));   /* 20 */
+    --btn-r: calc(var(--card-r) - var(--p)); /* 12 */
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--page); font-family:"Hanken Grotesk",system-ui,sans-serif; color:var(--ink); padding:32px; }
+  h1 { font-weight:800; font-size:26px; margin:0 0 6px; letter-spacing:-.02em; }
+  h2 { font-weight:700; font-size:18px; margin:40px 0 6px; }
+  .sub { color:oklch(0.42 0.004 60); margin:0 0 18px; font-size:15px; max-width:92ch; line-height:1.45; }
+  .rules { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:8px; max-width:1100px; }
+  .rules div { background:var(--paper); border-radius:var(--card-r); padding:14px 16px; font-size:14px; line-height:1.45; }
+  .rules b { display:block; font-size:15px; margin-bottom:3px; }
+
+  .types { display:grid; grid-template-columns:repeat(auto-fill,minmax(232px,1fr)); gap:18px; }
+  .type { background:var(--screen); border-radius:var(--R); padding:var(--m); display:flex; flex-direction:column; gap:12px; }
+  .type .meta { color:var(--text); padding:0 6px 6px; }
+  .type .meta b { font-size:14px; font-weight:700; display:block; }
+  .type .meta span { font-size:12px; color:var(--text-2); line-height:1.35; display:block; margin-top:3px; }
+
+  /* one card = one surface. Text sits on it. Only tappable things are tiles. */
+  .card { background:var(--surface); color:var(--text); border-radius:var(--card-r); padding:var(--p); display:flex; flex-direction:column; gap:var(--p); }
+  .c { padding:6px 6px 2px; }                          /* content area: no box */
+  .src { font-size:11.5px; font-weight:600; color:var(--text-2); }
+  .who { font-size:16px; font-weight:700; margin-top:2px; }
+  .msg { font-size:14px; line-height:1.38; margin-top:8px; }
+  .word { font-size:32px; font-weight:800; letter-spacing:-.05em; line-height:.9; margin-top:8px; }
+  .line { font-size:13px; color:var(--text-2); margin-top:6px; }
+  .acts { display:flex; gap:var(--p); }
+  .btn { flex:1; border-radius:var(--btn-r); padding:13px 12px; font-size:14px; font-weight:700; background:var(--paper); color:var(--ink); display:flex; justify-content:space-between; align-items:center; gap:6px; white-space:nowrap; }
+  .btn.go { background:var(--o); flex:1.6; }
+  .btn.ghost { background:transparent; color:var(--text); box-shadow:inset 0 0 0 1.5px oklch(0.60 0.004 60); flex:.8; justify-content:center; }
+  .rows { display:flex; flex-direction:column; gap:4px; }
+  .row { border-radius:var(--btn-r); padding:11px 12px; background:var(--paper); color:var(--ink); font-size:14px; font-weight:600; display:flex; justify-content:space-between; }
+  .row small { font-weight:500; color:oklch(0.45 0.004 60); font-size:12px; }
+  .media { border-radius:var(--btn-r); overflow:hidden; position:relative; }
+  .media img { width:100%; height:100%; object-fit:cover; display:block; }
+  .photos { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; }
+  .photos .media { aspect-ratio:3/4; border-radius:var(--btn-r); }
+  .photos .nm { position:absolute; left:5px; bottom:5px; font-size:11px; font-weight:700; color:var(--ink); background:var(--paper); padding:2px 6px; border-radius:3px; }
+  .map { height:118px; background:oklch(0.22 0.004 60); }
+  .map svg { width:100%; height:100%; display:block; } .map .r { stroke:oklch(0.34 0.004 60); fill:none; stroke-linecap:round; }
+  .pin { position:absolute; transform:translate(-50%,-50%); width:18px; height:18px; border-radius:50%; background:var(--paper); color:var(--ink); font-size:10px; font-weight:800; display:grid; place-items:center; }
+  .bar { display:flex; gap:3px; margin-top:12px; } .bar i { flex:1; height:8px; border-radius:2px; background:oklch(0.42 0.004 60); } .bar i.on { background:var(--text); }
+  .status { display:flex; justify-content:space-between; font-size:14px; font-weight:600; margin-top:8px; }
+  .status i { font-style:normal; font-size:12px; color:var(--text-2); } .status i.y { color:var(--text); }
+  .slots { display:flex; gap:4px; } .slots .btn { justify-content:center; padding:13px 0; border-radius:var(--btn-r); }
+  .ctl { display:flex; gap:4px; } .ctl .btn { justify-content:center; border-radius:var(--btn-r); font-size:15px; }
+  .tick { display:inline-grid; place-items:center; width:22px; height:22px; border-radius:50%; background:var(--text); color:var(--ink); font-size:12px; font-weight:800; margin-right:8px; vertical-align:2px; }
+
+  .ba { display:flex; gap:28px; align-items:flex-start; flex-wrap:wrap; }
+  .ba > div { width:280px; }
+  .ba .lbl { font-size:13px; font-weight:700; margin-bottom:8px; }
+  .old .t { background:var(--paper); color:var(--ink); border-radius:5px; padding:10px 11px; }
+  .old { background:oklch(0.14 0.004 60); border-radius:var(--card-r); padding:3px; display:grid; gap:3px; grid-template-columns:1fr 1fr; }
+
+  .art { border-radius:var(--btn-r); overflow:hidden; } .art img { width:100%; height:100%; object-fit:cover; display:block; }
+  .scrub { margin-top:10px; } .scrub .track { height:4px; border-radius:2px; background:oklch(0.44 0.004 60); position:relative; }
+  .scrub .track i { position:absolute; left:0; top:0; bottom:0; width:38%; background:var(--text); border-radius:2px; }
+  .scrub .track b { position:absolute; left:38%; top:50%; width:12px; height:12px; margin:-6px 0 0 -6px; border-radius:50%; background:var(--text); }
+  .scrub .tm { display:flex; justify-content:space-between; font-size:11px; color:var(--text-2); margin-top:5px; font-variant-numeric:tabular-nums; }
+  .pc { display:grid; grid-template-columns:1fr 1fr 1.4fr 1fr 1fr; gap:4px; align-items:stretch; }
+  .pc .btn { justify-content:center; padding:12px 0; border-radius:var(--btn-r); font-size:15px; }
+  .pc .btn.big { font-size:20px; }
+  .pc .btn.ghost { box-shadow:none; background:transparent; color:var(--text-2); }
+  .sizes { display:grid; grid-template-columns:200px 250px 290px; gap:22px; align-items:end; }
+  .sizecol .cap { font-size:13px; color:oklch(0.36 0.004 60); margin-top:10px; line-height:1.4; } .sizecol .cap b { color:var(--ink); }
+  .scr { background:var(--screen); border-radius:var(--R); padding:var(--m); }
+  .q2 { display:flex; justify-content:space-between; font-size:13px; padding:9px 4px; color:var(--text); border-top:1px solid oklch(0.32 0.004 60); }
+  .q2 span { color:var(--text-2); }
+  .chips { display:flex; gap:4px; } .chip { padding:7px 11px; border-radius:999px; font-size:12px; font-weight:700; background:var(--paper); color:var(--ink); }
+  .chip.on { background:transparent; color:var(--text); box-shadow:inset 0 0 0 1.5px var(--text); }
+
+  .flow { display:flex; gap:26px; align-items:flex-start; flex-wrap:wrap; }
+  .pho { overflow:visible; width:228px; height:506px; border-radius:var(--R); background:var(--screen); position:relative; overflow:hidden; margin:13px;
+         box-shadow:0 0 0 10px oklch(0.10 0.003 60), 0 0 0 11.5px oklch(0.34 0.003 60); }
+  .pho::before { content:""; position:absolute; top:11px; left:50%; width:13px; height:13px; margin-left:-6.5px; border-radius:50%; background:oklch(0.04 0.003 60); z-index:9; }
+  .pho .card { position:absolute; left:var(--m); right:var(--m); }
+  .dk { position:absolute; left:var(--m); right:var(--m); bottom:var(--m); background:var(--surface); border-radius:var(--card-r); padding:6px; display:grid; grid-template-columns:1fr 46px; gap:6px; }
+  .dk .fld { background:oklch(0.22 0.004 60); border-radius:var(--btn-r); padding:8px 10px; font-size:13px; line-height:1.3; color:var(--text-2); display:flex; flex-direction:column; align-items:flex-start; gap:5px; min-height:46px; }
+  .dk .tag { background:var(--paper); color:var(--ink); font-size:11px; font-weight:700; border-radius:var(--btn-r); padding:3px 6px; white-space:nowrap; }
+  .dk .tag i { font-style:normal; opacity:.5; margin-left:4px; }
+  .dk .mic2 { border-radius:var(--btn-r); background:var(--paper); display:grid; place-items:center; }
+  .dk .mic2 span { width:12px; height:16px; border-radius:4px 4px 7px 7px; border:2.5px solid var(--ink); }
+  .typed { color:var(--text); }
+  .fcap { width:254px; font-size:13px; color:oklch(0.36 0.004 60); line-height:1.4; margin-top:8px; } .fcap b { color:var(--ink); }
+  .arrowbig { align-self:center; font-size:28px; color:oklch(0.5 0.004 60); }
+
+  .key { position:absolute; right:-13px; width:4px; border-radius:2px; background:oklch(0.45 0.003 60); }
+  .keyon { background:var(--o); }
+  .listen { position:absolute; left:var(--m); right:var(--m); background:var(--surface); border-radius:var(--card-r); padding:12px; color:var(--text); }
+  .wv { display:flex; gap:3px; align-items:center; height:18px; margin-top:10px; } .wv i { width:3px; border-radius:2px; background:var(--o); }
+  .hint { position:absolute; left:0; right:0; bottom:10px; text-align:center; font-size:10.5px; color:oklch(0.5 0.004 60); }
+  .kb2 { position:absolute; left:0; right:0; bottom:0; height:172px; background:oklch(0.22 0.004 60); padding:9px 5px; display:flex; flex-direction:column; gap:6px; }
+  .kb2 div { display:flex; gap:4px; justify-content:center; } .kb2 i { width:18px; height:30px; border-radius:4px; background:oklch(0.36 0.004 60); }
+  .field2 { position:absolute; left:var(--m); right:var(--m); background:var(--surface); border-radius:var(--card-r); padding:6px; display:grid; grid-template-columns:1fr 40px; gap:6px; }
+  .field2 .in { background:oklch(0.20 0.004 60); border-radius:var(--btn-r); padding:8px 10px; font-size:13px; color:var(--text); display:flex; flex-direction:column; gap:5px; align-items:flex-start; }
+  .field2 .go2 { background:var(--o); border-radius:var(--btn-r); display:grid; place-items:center; font-weight:800; color:var(--ink); }
+  .tag2 { background:var(--paper); color:var(--ink); font-size:11px; font-weight:700; border-radius:var(--btn-r); padding:3px 6px; }
+  .pull { position:absolute; top:34px; left:50%; transform:translateX(-50%); font-size:16px; color:oklch(0.55 0.004 60); }
+
+  /* 3a body: its own shape, corner ~9% of body width (measured), not screen R + bezel */
+  .phone, .pho { box-shadow:none !important; overflow:visible !important; isolation:isolate; }
+  .phone::after, .pho::after { content:""; position:absolute; inset:-10px; border-radius:22px; background:oklch(0.10 0.003 60);
+     box-shadow:0 0 0 1.5px oklch(0.34 0.003 60), 0 18px 40px 6px oklch(0.2 0.01 60 / .22); z-index:-1; }
+
+  .car { position:absolute; left:0; right:0; overflow:hidden; }
+  .car .track { display:flex; gap:6px; padding-left:var(--m); }
+  .car .card { position:relative !important; left:auto !important; right:auto !important; flex:none; width:188px; }
+  .car .hero { height:150px; border-radius:var(--btn-r); overflow:hidden; } .car .hero img { width:100%; height:100%; object-fit:cover; display:block; }
+  .dots { display:flex; gap:4px; justify-content:center; margin-top:8px; } .dots i { width:5px; height:5px; border-radius:50%; background:oklch(0.4 0.004 60); } .dots i.on { background:var(--text); width:14px; border-radius:3px; }
+  .count { font-size:11px; color:var(--text-2); }
+  .strip { display:flex; gap:4px; overflow:hidden; margin:0 calc(-1 * var(--p)); padding:0 var(--p); }
+  .strip .media { flex:none; width:96px; height:120px; border-radius:var(--btn-r); position:relative; overflow:hidden; }
+  .strip .media img { width:100%; height:100%; object-fit:cover; display:block; }
+  .strip .nm { position:absolute; left:5px; bottom:5px; font-size:11px; font-weight:700; color:var(--ink); background:var(--paper); padding:2px 6px; border-radius:3px; }
+  .sstrip { display:flex; gap:4px; overflow:hidden; margin-right:calc(-1 * var(--p)); }
+  .sstrip .btn { flex:none; width:58px; flex-direction:column; justify-content:center; align-items:center; gap:2px; padding:10px 0; }
+  .sstrip .btn small { display:block; font-size:10px; font-weight:600; color:oklch(0.45 0.004 60); }
+
+  /* button hierarchy: solid orange = commits, orange outline = picks/moves forward, grey outline = everything else */
+  .btn.pick { background:transparent; color:#fe843d; box-shadow:inset 0 0 0 1.5px #fe843d; }
+  .btn.pick.fill { background:oklch(0.66 0.21 40 / .14); box-shadow:none; }
+  .btn.pick small { color:oklch(0.66 0.21 40 / .75) !important; }
+  .legend3 { display:flex; gap:10px; margin:0 0 18px; flex-wrap:wrap; }
+  .legend3 div { background:oklch(0.255 0.004 60); border-radius:11px; padding:6px; display:flex; align-items:center; gap:10px; padding-right:14px; color:var(--text); font-size:13px; }
+  .legend3 .btn { flex:none; padding:10px 14px; }
+</style></head><body>
+
+<h1>Card system v23</h1>
+<p class="sub">Rebuilt after "too many stacked white boxes". A card is one surface. Reading content sits on it as plain text. Only things you can tap are tiles, and every button says what it does.</p>
+
+<div class="rules">
+  <div><b>One surface</b>Header, hero and message are text on the card, never boxed.</div>
+  <div><b>Tiles mean tap</b>Buttons, rows, photos, maps. If it's a tile, you can press it.</div>
+  <div><b>Verbs on buttons</b>Solid orange only when it sends. Orange outline to pick or go on.</div>
+</div>
+
+<h2>Buttons</h2>
+<div class="legend3"><div><span class="btn go">Send →</span>Commits: sends, books, creates</div><div><span class="btn pick">Choose</span>Moves forward, nothing sent</div><div><span class="btn ghost">Map</span>Everything else</div><div><span class="btn">14:30</span>An option to pick (rows, photos, slots, controls)</div></div>
+<h2>Before and after</h2>
+<div class="ba">
+  <div><div class="lbl">Before</div>
+    <div class="old"><div class="t" style="grid-column:1/3;background:oklch(0.88 0.003 90)"><div style="font-size:11px;color:#777;font-weight:600">Email</div><div style="font-weight:700">ColleagueB K.</div></div>
+      <div class="t" style="grid-column:1/3;font-size:14px">Could we meet next week about the rebrand?</div>
+      <div class="t" style="background:var(--o);font-weight:700">Free slots</div><div class="t" style="font-weight:700">Calendly</div></div></div>
+  <div><div class="lbl">After</div>
+    <div class="card"><div class="c"><div class="src">Email</div><div class="who">ColleagueB K.</div><div class="msg">Could we meet next week about the rebrand?</div></div>
+      <div class="acts"><div class="btn pick" style="flex:1.6">Suggest times <span>→</span></div><div class="btn ghost">Reply</div></div></div></div>
+</div>
+
+<h2>Card types</h2>
+<p class="sub">Same thirteen, same five slots, new rule.</p>
+<div class="types" id="types"></div>
+
+<div id="sizesHost"></div>
+
+<h2>Scrolling sideways</h2>
+<p class="sub">When there are several options, swipe sideways. Two kinds. A carousel when each option needs its own space (photo, why, actions); the next card peeks in so you know there's more. A strip inside one card for small things (photos, time slots). Choosing isn't sending, so choices use the orange outline, never solid orange.</p>
+<div class="flow">
+  <div><div class="pho">
+    <div style="position:absolute;left:14px;right:14px;top:58px;color:var(--text)"><div class="src">Instinct · 6 places</div><div class="who" style="font-size:18px">Lisbon, Saturday</div></div>
+    <div class="car" style="top:120px"><div class="track"><div class="card"><div class="hero"><img src="https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=400&q=65"></div><div class="c" style="padding-top:2px"><div class="who">Prado</div><div class="line" style="margin-top:2px">Natural wine, seasonal · 9 min</div></div><div class="acts"><div class="btn pick">Choose</div><div class="btn ghost">Map</div></div></div><div class="card"><div class="hero"><img src="https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400&q=65"></div><div class="c" style="padding-top:2px"><div class="who">Taberna</div><div class="line" style="margin-top:2px">No bookings, petiscos · 12 min</div></div><div class="acts"><div class="btn pick">Choose</div><div class="btn ghost">Map</div></div></div><div class="card"><div class="hero"><img src="https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=400&q=65"></div><div class="c" style="padding-top:2px"><div class="who">O Velho Eurico</div><div class="line" style="margin-top:2px">Old tasca, queue 19:30 · 15 min</div></div><div class="acts"><div class="btn pick">Choose</div><div class="btn ghost">Map</div></div></div><div class="card"><div class="hero"><img src="https://images.unsplash.com/photo-1559339352-11d035aa65de?w=400&q=65"></div><div class="c" style="padding-top:2px"><div class="who">Ramiro</div><div class="line" style="margin-top:2px">Seafood, loud · 18 min</div></div><div class="acts"><div class="btn pick">Choose</div><div class="btn ghost">Map</div></div></div></div></div>
+    <div style="position:absolute;left:0;right:0;top:442px"><div class="dots"><i class="on"></i><i></i><i></i><i></i><i></i><i></i></div></div>
+  </div><div class="fcap"><b>Card carousel.</b> One suggestion per card: photo, why it fits, distance. Next card peeks in. Dots show how many.</div></div>
+
+  <div><div class="pho">
+    <div class="card" style="bottom:var(--m)"><div class="c" style="display:flex;justify-content:space-between;align-items:flex-end"><div><div class="src">Instinct</div><div class="who">Lisbon, Saturday</div></div><span class="count">6 →</span></div>
+      <div class="strip"><div class="media"><img src="https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=400&q=65"><span class="nm">Prado</span></div><div class="media"><img src="https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400&q=65"><span class="nm">Taberna</span></div><div class="media"><img src="https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=400&q=65"><span class="nm">Eurico</span></div><div class="media"><img src="https://images.unsplash.com/photo-1559339352-11d035aa65de?w=400&q=65"><span class="nm">Ramiro</span></div></div>
+      <div class="acts"><div class="btn ghost" style="flex:1">Show on map</div></div></div>
+  </div><div class="fcap"><b>Strip in a card.</b> Photos scroll inside the card; the card itself stays put. Good for quick picks by eye.</div></div>
+
+  <div><div class="pho">
+    <div class="card" style="bottom:var(--m)"><div class="c"><div class="src">Email · ColleagueB K.</div><div class="who">Pick a time</div></div>
+      <div class="sstrip"><div class="btn">Thu<small>10:00</small></div><div class="btn">Thu<small>14:30</small></div><div class="btn">Thu<small>16:00</small></div><div class="btn">Fri<small>09:30</small></div><div class="btn">Fri<small>13:00</small></div></div>
+      <div class="btn ghost" style="flex:none;justify-content:center">Send Calendly link instead</div></div>
+  </div><div class="fcap"><b>Slot strip.</b> More times than fit: scroll sideways through the week.</div></div>
+</div>
+
+<h2>Talk to any card</h2>
+<p class="sub">No dock. Hold the side Essential Key to talk; pull down anywhere to type. Either way you're talking to the card in front, shown by its name tag. What you say becomes a draft; only a tap sends. Buttons are suggestions, never the only way.</p>
+<div class="flow">
+  <div><div class="pho"><span class="key" style="top:150px;height:34px"></span><span class="key" style="top:205px;height:60px"></span>
+    <div class="card" style="top:300px"><div class="c"><div class="src">Email</div><div class="who">ColleagueB K.</div><div class="msg">Could we meet next week about the rebrand?</div></div><div class="acts"><div class="btn pick" style="flex:1.6">Suggest times <span>→</span></div><div class="btn ghost">Reply</div></div></div>
+    <div class="hint">hold side key to talk · pull down to type</div>
+  </div><div class="fcap"><b>Resting.</b> Just the card. A quiet hint at the bottom for the first days, then gone.</div></div>
+
+  <div><div class="pho"><span class="key keyon" style="top:150px;height:34px"></span><span class="key" style="top:205px;height:60px"></span>
+    <div class="card" style="top:150px"><div class="c"><div class="src">Email</div><div class="who">ColleagueB K.</div><div class="msg">Could we meet next week about the rebrand?</div></div><div class="acts"><div class="btn pick" style="flex:1.6">Suggest times <span>→</span></div><div class="btn ghost">Reply</div></div></div>
+    <div class="listen" style="bottom:6px"><span class="tag2">ColleagueB K.</span><div style="font-size:16px;font-weight:600;margin-top:8px;line-height:1.3">Thursday after 2, and ask for the brief first</div><div class="wv"><i style="height:5px"></i><i style="height:10px"></i><i style="height:16px"></i><i style="height:8px"></i><i style="height:18px"></i><i style="height:12px"></i><i style="height:6px"></i><i style="height:14px"></i><i style="height:18px"></i><i style="height:10px"></i><i style="height:5px"></i><i style="height:12px"></i><i style="height:16px"></i><i style="height:8px"></i><i style="height:4px"></i><i style="height:9px"></i><i style="height:14px"></i><i style="height:6px"></i></div></div>
+  </div><div class="fcap"><b>Holding the key.</b> Your words appear as you speak, addressed to the card above. Let go to send it to the agent.</div></div>
+
+  <div><div class="pho"><span class="key" style="top:150px;height:34px"></span><span class="key" style="top:205px;height:60px"></span>
+    <div class="pull">↓</div>
+    <div class="card" style="top:58px"><div class="c"><div class="src">Email</div><div class="who">ColleagueB K.</div><div class="msg">Could we meet next week about the rebrand?</div></div><div class="acts"><div class="btn pick" style="flex:1.6">Suggest times <span>→</span></div><div class="btn ghost">Reply</div></div></div>
+    <div class="field2" style="bottom:178px"><div class="in"><span class="tag2">ColleagueB K. ✕</span>Thursday after 2…</div><div class="go2">↑</div></div>
+    <div class="kb2"><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div><i style="width:130px"></i></div></div>
+  </div><div class="fcap"><b>Pull down to type.</b> Keyboard and a field tagged to the front card. ✕ clears the tag to ask Misura anything.</div></div>
+
+  <div><div class="pho"><span class="key" style="top:150px;height:34px"></span><span class="key" style="top:205px;height:60px"></span>
+    <div class="card" style="top:300px"><div class="c"><div class="src">Email · reply</div><div class="who">ColleagueB K.</div><div class="msg" style="font-size:15px">Thursday after 14:00 works for me. Could you send the brief beforehand?</div></div><div class="acts"><div class="btn go">Send <span>→</span></div><div class="btn ghost">Edit</div></div></div>
+  </div><div class="fcap"><b>It becomes a draft.</b> Same card, now Approve. Talk again to change it; Send is the only thing that sends.</div></div>
+</div>
+
+<script>
+const IMG = ['1517248135467-4c7edcad34c4','1555396273-367ea4eb4db5','1414235077428-338989a2e8c0'].map(i => `https://images.unsplash.com/photo-${i}?w=240&q=60`);
+const MAP = `<svg viewBox="0 0 220 120" preserveAspectRatio="xMidYMid slice"><g class="r" stroke-width="4"><path d="M-10 30 Q80 40 230 20"/><path d="M40 -10 Q60 60 30 130"/><path d="M120 -10 Q110 60 150 130"/><path d="M-10 80 Q100 70 230 90"/></g><g class="r" stroke-width="1.5"><path d="M80 0 L95 120"/><path d="M0 55 L220 50"/></g></svg>`;
+const H = (src, who) => `<div class="src">${src}</div><div class="who">${who}</div>`;
+const T = [
+  ['Progress','Agent working. Nothing to tap.', `<div class="card"><div class="c">${H('Instinct','Lisbon restaurants, Saturday')}<div class="bar"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></div><div class="line">42 s · usually a minute</div></div></div>`],
+  ['Text','A fact. Nothing to tap.', `<div class="card"><div class="c">${H('Instinct','Prado, Sunday')}<div class="word">Closed</div><div class="line">Open Saturday from 19:00</div></div></div>`],
+  ['Text + action','Something happened, one next step.', `<div class="card"><div class="c">${H('FriendB, ColleagueA','Coffee Sat 11:00')}<div class="word" style="font-size:26px">Both said yes</div></div><div class="acts"><div class="btn go">Add to calendar <span>→</span></div></div></div>`],
+  ['Incoming','A person needs you. Their words, then clear replies.', `<div class="card"><div class="c">${H('Email','ColleagueB K.')}<div class="msg">Could we meet next week about the rebrand?</div></div><div class="acts"><div class="btn pick" style="flex:1.6">Suggest times <span>→</span></div><div class="btn ghost">Reply</div></div></div>`],
+  ['Choices','Rows are the tap targets.', `<div class="card"><div class="c">${H('Instinct','Lisbon, Saturday')}</div><div class="rows"><div class="row">Taberna <small>no bookings</small></div><div class="row">Prado <small>book ahead</small></div><div class="row">O Velho Eurico <small>19:30 queue</small></div></div></div>`],
+  ['Gallery','Photos are the tap targets.', `<div class="card"><div class="c">${H('Instinct','Lisbon, Saturday')}</div><div class="photos">${IMG.map((u,i)=>`<div class="media"><img src="${u}"><span class="nm">${['Taberna','Prado','Eurico'][i]}</span></div>`).join('')}</div></div>`],
+  ['Map','Tap to open full screen.', `<div class="card"><div class="c">${H('Instinct','3 places nearby')}</div><div class="media map">${MAP}<span class="pin" style="left:30%;top:40%">1</span><span class="pin" style="left:62%;top:30%">2</span><span class="pin" style="left:50%;top:72%">3</span></div></div>`],
+  ['Approve','The exact message. The only card that commits.', `<div class="card"><div class="c">${H('WhatsApp','FriendB')}<div class="msg" style="font-size:16px">Sat 19:30 at Prado? 🙂</div></div><div class="acts"><div class="btn go">Send <span>→</span></div><div class="btn ghost">Edit</div></div></div>`],
+  ['Slots','Tap a time: reply + invite go out. Or hand over your Calendly.', `<div class="card"><div class="c">${H('Email · ColleagueB K.','Pick a time, Thursday')}</div><div class="slots"><div class="btn">10:00</div><div class="btn">14:30</div><div class="btn">16:00</div></div><div class="btn ghost" style="flex:none;justify-content:center">Send Calendly link instead</div></div>`],
+  ['Waiting','Sent, waiting on people. Nothing to tap.', `<div class="card"><div class="c">${H('Coffee Sat 11:00','Prado')}<div class="status">FriendB <i class="y">yes</i></div><div class="status" style="margin-top:4px">ColleagueA <i>waiting</i></div></div></div>`],
+  ['Live · music','Artwork, track, scrubber, full controls.', `<div class="card"><div style="display:grid;grid-template-columns:76px 1fr;gap:12px;align-items:center;padding:2px"><div class="art" style="height:76px"><img src="https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=500&q=70"></div><div>${H('Spotify','Slow Hands')}<div class="line" style="margin-top:2px">Niall Horan</div></div></div><div class="scrub" style="padding:0 4px"><div class="track"><i></i><b></b></div><div class="tm"><span>1:14</span><span>3:08</span></div></div><div class="pc"><div class="btn ghost">⇄</div><div class="btn">⏮</div><div class="btn big" style="justify-content:center">⏸</div><div class="btn">⏭</div><div class="btn ghost">♡</div></div></div>`],
+  ['Problem','Says what went wrong, offers the fix.', `<div class="card"><div class="c">${H('WhatsApp','FriendB')}<div class="word" style="font-size:24px">Not sure it sent</div></div><div class="acts"><div class="btn pick" style="flex:1.6">Check again <span>→</span></div><div class="btn ghost">Open chat</div></div></div>`],
+  ['Done','Proof, then it clears. Nothing to tap.', `<div class="card"><div class="c" style="padding-bottom:6px">${H('WhatsApp','FriendB')}<div class="word" style="font-size:26px"><span class="tick">✓</span>Sent</div><div class="line">seen 16:44</div></div></div>`],
+];
+document.getElementById('types').innerHTML = T.map(([n,d,h]) => `<div class="type">${h}<div class="meta"><b>${n}</b><span>${d}</span></div></div>`).join('');
+document.getElementById("sizesHost").innerHTML = `
+<h2>Sizes add detail</h2>
+<p class="sub">Like widgets: the same card grows richer as it gets bigger. Compact is a glance, standard is the default, expanded is the full tool. Swipe up to grow, down to shrink.</p>
+
+<div class="sizes">
+  <div class="sizecol"><div class="scr"><div class="card" style="flex-direction:row;align-items:center;gap:10px;padding:6px"><div class="art" style="width:40px;height:40px;border-radius:var(--btn-r)"><img src="https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=500&q=70"></div><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700">Slow Hands</div><div class="src">Niall Horan</div></div><div class="btn" style="flex:none;width:40px;height:40px;padding:0;justify-content:center;border-radius:var(--btn-r)">⏸</div></div></div>
+    <div class="cap"><b>Compact.</b> Art, title, play. Sleep screen, background.</div></div>
+  <div class="sizecol"><div class="scr"><div class="card"><div style="display:grid;grid-template-columns:64px 1fr;gap:12px;align-items:center;padding:2px"><div class="art" style="height:64px"><img src="https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=500&q=70"></div><div><div class="src">Spotify</div><div class="who">Slow Hands</div><div class="line" style="margin-top:2px">Niall Horan</div></div></div><div class="scrub" style="padding:0 4px"><div class="track"><i></i><b></b></div><div class="tm"><span>1:14</span><span>3:08</span></div></div><div class="pc"><div class="btn ghost">⇄</div><div class="btn">⏮</div><div class="btn big">⏸</div><div class="btn">⏭</div><div class="btn ghost">♡</div></div></div></div>
+    <div class="cap"><b>Standard.</b> Adds scrubber and full transport.</div></div>
+  <div class="sizecol"><div class="scr"><div class="card"><div class="art" style="height:210px"><img src="https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=500&q=70"></div><div class="c" style="display:flex;justify-content:space-between;align-items:flex-end"><div><div class="src">Spotify · Calm for cooking</div><div class="who" style="font-size:20px">Slow Hands</div><div class="line" style="margin-top:2px">Niall Horan</div></div><div class="btn ghost" style="flex:none;padding:8px 12px">♡</div></div><div class="scrub" style="padding:0 4px"><div class="track"><i></i><b></b></div><div class="tm"><span>1:14</span><span>3:08</span></div></div><div class="pc"><div class="btn ghost">⇄</div><div class="btn">⏮</div><div class="btn big">⏸</div><div class="btn">⏭</div><div class="btn ghost">↻</div></div>
+      <div class="c" style="padding-top:2px"><div class="src" style="margin-bottom:2px">Up next</div><div class="q2">Ocean Eyes <span>Billie Eilish</span></div><div class="q2">Holocene <span>Bon Iver</span></div></div>
+      <div class="acts"><div class="btn">More like this</div><div class="btn ghost">Open Spotify</div></div></div></div>
+    <div class="cap"><b>Expanded.</b> Big art, queue, "more like this", open in app.</div></div>
+</div>
+
+<div class="sizes" style="margin-top:28px">
+  <div class="sizecol"><div class="scr"><div class="card" style="flex-direction:row;align-items:center;gap:10px;padding:6px 6px 6px 12px"><div style="flex:1"><div style="font-size:13px;font-weight:700">3 places, Lisbon</div><div class="src">Prado closest · 9 min</div></div><div class="btn" style="flex:none;width:40px;height:40px;padding:0;justify-content:center;border-radius:var(--btn-r)">→</div></div></div>
+    <div class="cap"><b>Compact.</b> Count and the best one.</div></div>
+  <div class="sizecol"><div class="scr"><div class="card"><div class="c">${H('Instinct','Lisbon, Saturday')}</div><div class="photos">${IMG.map((u,i)=>'<div class="media"><img src="'+u+'"><span class="nm">'+['Taberna','Prado','Eurico'][i]+'</span></div>').join('')}</div></div></div>
+    <div class="cap"><b>Standard.</b> Photos to pick by eye.</div></div>
+  <div class="sizecol"><div class="scr"><div class="card"><div class="c">${H('Instinct','Lisbon, Saturday')}</div><div class="chips"><span class="chip on">dinner</span><span class="chip">&lt;10 min</span><span class="chip">no booking</span></div><div class="media map" style="height:170px">${MAP}<span class="pin" style="left:30%;top:40%">1</span><span class="pin" style="left:62%;top:30%;background:var(--o)">2</span><span class="pin" style="left:50%;top:72%">3</span></div>
+      <div class="rows"><div class="row">Taberna <small>no bookings · 12 min</small></div><div class="row" style="box-shadow:inset 0 0 0 2px var(--o)">Prado <small>natural wine · 9 min</small></div><div class="row">O Velho Eurico <small>19:30 queue · 15 min</small></div></div>
+      <div class="acts"><div class="btn pick" style="flex:1.6">Message FriendB <span>→</span></div><div class="btn ghost">Directions</div></div></div></div>
+    <div class="cap"><b>Expanded.</b> Map, filters, details per place, next steps.</div></div>
+</div>
+`;
+
+</script>
+</body></html>

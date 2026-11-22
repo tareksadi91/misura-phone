@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Misura App List</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@300;400;600;700&display=swap">
+<style>
+/* Real tokens from design-system.md. Phones at true scale: 3a = 360 x 797 dp, 1 css px = 1 dp. */
+:root{--screen:#080706;--surface:#262423;--sunk:#1c1a19;--text:#efeeec;--text2:#adaaa8;--ink:#110f0e;--orange:#f47b30;--outline:#82807e;--page:#141211;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--text);font:15px/1.5 "Hanken Grotesk",system-ui,sans-serif;padding:32px 16px 64px}
+header{max-width:1560px;margin:0 auto 28px}
+h1{font:700 30px/1.1 "Hanken Grotesk";letter-spacing:-.03em;margin:0 0 8px}
+header p{color:var(--text2);max-width:72ch;margin:0}
+.row{max-width:1560px;margin:0 auto;display:flex;gap:28px;flex-wrap:wrap;justify-content:center}
+figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:12px}
+figcaption{color:var(--text2);font-size:13px;max-width:360px;text-align:center}
+figcaption b{color:var(--text);font-weight:600}
+
+.phone{width:360px;height:797px;border-radius:20px;background:var(--screen);position:relative;overflow:hidden;outline:8px solid #2a2827;box-shadow:0 30px 60px rgba(0,0,0,.45);user-select:none;touch-action:none}
+.status{position:absolute;top:0;left:0;right:0;height:30px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;font:600 12.5px "Hanken Grotesk";z-index:5}
+.status i{display:inline-block;width:18px;height:9px;border-radius:2px;background:#3ccf5a;vertical-align:-1px}
+.gbar{position:absolute;bottom:8px;left:50%;width:108px;height:4px;border-radius:2px;background:var(--text);transform:translateX(-50%);z-index:7}
+
+/* one progress value p (0 = home, 1 = apps) drives everything; k = keyboard up. Both move on a spring, never a CSS cut. */
+.phone{--p:0;--k:1}
+.home{position:absolute;inset:0;padding:30px 16px 0;opacity:max(0,calc(1 - var(--p)*2.2));transform:translateY(calc(var(--p)*12px))}
+.clock{font:300 46px/1 "Hanken Grotesk";letter-spacing:-.01em;margin-top:28px}
+.day{font:300 16px "Hanken Grotesk";color:var(--text2);margin-top:8px}
+.widget{position:absolute;top:66px;right:16px;background:var(--surface);border-radius:14px;padding:10px 12px;min-width:118px}
+.widget .l{font:600 11.5px "Hanken Grotesk";color:var(--text2)}
+.widget .v{font:800 22px/1.1 "Hanken Grotesk";letter-spacing:-.04em;margin-top:2px}
+.widget .v small{font:400 12px "Hanken Grotesk";color:var(--text2);letter-spacing:0;margin-left:3px}
+.made{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--orange);margin-left:6px;vertical-align:1px}
+.earlier{position:absolute;left:16px;bottom:82px;font:600 13.5px "Hanken Grotesk";color:var(--text2)}
+
+.field{position:absolute;left:6px;right:6px;bottom:calc(24px + 256px*var(--p)*var(--k));height:46px;border-radius:14px;background:var(--sunk);display:flex;align-items:center;padding:0 6px 0 16px;gap:10px;z-index:6}
+.field input{flex:1;min-width:0;background:none;border:0;outline:0;color:var(--text);font:400 17px "Hanken Grotesk"}
+.field input::placeholder{color:var(--text2)}
+.field .q{width:13px;height:13px;border:1.6px solid var(--text2);border-radius:50%;position:relative;flex:none;display:none}
+.field .q::after{content:"";position:absolute;width:6px;height:1.6px;background:var(--text2);right:-5px;bottom:-2px;transform:rotate(45deg)}
+.go{font:700 14px "Hanken Grotesk";color:var(--orange);border:1.5px solid var(--orange);border-radius:8px;padding:6px 11px;background:none;display:none;cursor:pointer}
+.phone:not(.open) .field.has .go{display:block}
+.phone.open .field{padding-left:14px}
+.phone.open .field .q{display:block}
+
+/* the list sits on the field: Pinned right above it, then all apps by use going up; scroll up for the rest */
+.list{position:absolute;left:0;right:0;top:30px;bottom:calc(78px + 256px*var(--p)*var(--k));overflow-y:auto;display:flex;flex-direction:column-reverse;padding:8px 0 6px;opacity:max(0,calc((var(--p) - .35)/.65));transform:translateY(calc((1 - var(--p))*-24px)) scale(calc(.97 + .03*var(--p)));transform-origin:50% 100%;scrollbar-width:none;z-index:4;pointer-events:none}
+.list::-webkit-scrollbar{display:none}
+.phone.open .list{pointer-events:auto}
+.sec{font:600 11.5px "Hanken Grotesk";color:var(--text2);padding:14px 16px 2px}
+.item{display:flex;align-items:center;gap:12px;padding:8px 16px;font:300 19px/1.25 "Hanken Grotesk";cursor:pointer;flex:none;border-radius:12px;margin:0 6px;padding:8px 10px}
+.item.top{background:var(--surface)}
+.item.top::after{content:"↵";margin-left:auto;color:var(--text2);font:400 15px "Hanken Grotesk"}
+.item.held{background:var(--surface)}
+.ic{width:20px;height:20px;flex:none;display:grid;place-items:center;color:var(--text2)}
+.ic.blank{border:1.4px solid #6b6865;border-radius:6px;width:17px;height:17px;margin:0 1.5px}
+.item .sub{color:var(--text2);font-size:16px}
+.item mark{background:none;color:var(--text);font-weight:600}
+.none{padding:10px 16px;color:var(--text2);font:300 16px "Hanken Grotesk"}
+
+/* long-press: the app's own actions, contained, one left edge */
+.menu{position:absolute;left:16px;right:72px;background:var(--surface);border-radius:14px;padding:6px 0;z-index:8;box-shadow:0 18px 40px rgba(0,0,0,.5);opacity:0;transform:scale(.96);transform-origin:20% 100%;transition:opacity .16s,transform .2s cubic-bezier(.2,.8,.2,1);pointer-events:none}
+.menu.on{opacity:1;transform:none;pointer-events:auto}
+.menu div{padding:10px 16px;font:400 16px "Hanken Grotesk";cursor:pointer}
+.menu .sh{color:var(--text)}
+.menu .meta{color:var(--text2)}
+.menu hr{border:0;border-top:1px solid #34312f;margin:4px 0}
+.scrim{position:absolute;inset:0;z-index:7;display:none}
+.scrim.on{display:block}
+.toast{position:absolute;left:50%;top:44px;transform:translateX(-50%);background:var(--surface);color:var(--text2);font:400 13px "Hanken Grotesk";padding:6px 12px;border-radius:10px;z-index:9;opacity:0;transition:opacity .2s;white-space:nowrap}
+.toast.on{opacity:1}
+
+.kbd{position:absolute;left:0;right:0;bottom:0;height:268px;background:#1b1a19;z-index:6;display:grid;grid-template-rows:repeat(4,1fr);padding:10px 4px 30px;gap:8px;transform:translateY(calc((1 - var(--p)*var(--k))*100%))}
+.kbd div{display:flex;gap:5px;justify-content:center}
+.kbd span{flex:0 0 31px;height:40px;border-radius:6px;background:#2f2d2c;display:grid;place-items:center;font:400 17px "Hanken Grotesk"}
+.kbd .wide{flex-basis:170px}
+@media (max-width:420px){.phone{zoom:.86}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Swipe down for apps</h1>
+  <p>Pinned apps sit nearest your thumb and aren’t repeated in All apps; pinned shortcuts leave their app below. Type to filter, press Enter to open the highlighted result, or long-press a row for shortcuts and pinning. Motion follows your finger and settles on a spring. Drag down to open, then down again or Escape to close.</p>
+</header>
+<div class="row">
+  <figure><div class="phone" id="live"></div><figcaption><b>Live.</b> Drag down slowly, then flick. Try “ur”, Enter, long-press a row.</figcaption></figure>
+  <figure><div class="phone" data-state="home"></div><figcaption><b>Home.</b> The field is Misura's: “What should we do?”.</figcaption></figure>
+  <figure><div class="phone" data-state="list"></div><figcaption><b>Swiped down.</b> Same field, now app search. Pinned right above it, then all apps by use; scroll up for more.</figcaption></figure>
+  <figure><div class="phone" data-state="ur"></div><figcaption><b>Two letters.</b> Apps and shortcuts filter instantly. Enter opens the highlighted one.</figcaption></figure>
+  <figure><div class="phone" data-state="scrolled"></div><figcaption><b>Scrolled.</b> The keyboard steps aside; tap the field to bring it back.</figcaption></figure>
+  <figure><div class="phone" data-state="menu"></div><figcaption><b>Long-press.</b> The app’s own shortcuts first, then Pin and App info.</figcaption></figure>
+</div>
+<script>
+const PINNED=[{n:"Urban Sports",s:"Check in"},{n:"Step counter",made:true},{n:"WhatsApp"},{n:"Maps"},{n:"Spotify"}];
+const ALL=["WhatsApp","Telegram","Maps","Spotify","Chrome","Gmail","Calendar","Waking Up","Uber","Messages","Photos","Camera","Vinted","Amazon","LinkedIn","YouTube","YouTube Music","Keep","Drive","Wallet","Fitbit","PayPal","Contacts","Phone","Clock","Calculator","Weather","Files","Recorder","Gallery","Google Home","Gemini","Play Store","Settings","Shizuku","Urban Sports"];
+// mockup only: Simple Icons paths (inlined) stand in for each app's own monochrome layer; a missing one falls back to the outline square, as in the app
+const SLUG={WhatsApp:"whatsapp",Telegram:"telegram",Maps:"googlemaps",Spotify:"spotify",Chrome:"googlechrome",Gmail:"gmail",Calendar:"googlecalendar",Uber:"uber",Messages:"googlemessages",Photos:"googlephotos",Vinted:"vinted",Amazon:"amazon",YouTube:"youtube","YouTube Music":"youtubemusic",Keep:"googlekeep",Drive:"googledrive",Wallet:"googlepay",Fitbit:"fitbit",PayPal:"paypal","Google Home":"googlehome",Gemini:"googlegemini","Play Store":"googleplay",Settings:"android",Camera:"nothing",Gallery:"nothing",Recorder:"nothing",Weather:"nothing"};
+const PATH={"youtubemusic": "M12 0C5.376 0 0 5.376 0 12s5.376 12 12 12 12-5.376 12-12S18.624 0 12 0zm0 19.104c-3.924 0-7.104-3.18-7.104-7.104S8.076 4.896 12 4.896s7.104 3.18 7.104 7.104-3.18 7.104-7.104 7.104zm0-13.332c-3.432 0-6.228 2.796-6.228 6.228S8.568 18.228 12 18.228s6.228-2.796 6.228-6.228S15.432 5.772 12 5.772zM9.684 15.54V8.46L15.816 12l-6.132 3.54z", "googlecalendar": "M18.316 5.684H24v12.632h-5.684V5.684zM5.684 24h12.632v-5.684H5.684V24zM18.316 5.684V0H1.895A1.894 1.894 0 0 0 0 1.895v16.421h5.684V5.684h12.632zm-7.207 6.25v-.065c.272-.144.5-.349.687-.617s.279-.595.279-.982c0-.379-.099-.72-.3-1.025a2.05 2.05 0 0 0-.832-.714 2.703 2.703 0 0 0-1.197-.257c-.6 0-1.094.156-1.481.467-.386.311-.65.671-.793 1.078l1.085.452c.086-.249.224-.461.413-.633.189-.172.445-.257.767-.257.33 0 .602.088.816.264a.86.86 0 0 1 .322.703c0 .33-.12.589-.36.778-.24.19-.535.284-.886.284h-.567v1.085h.633c.407 0 .748.109 1.02.327.272.218.407.499.407.843 0 .336-.129.614-.387.832s-.565.327-.924.327c-.351 0-.651-.103-.897-.311-.248-.208-.422-.502-.521-.881l-1.096.452c.178.616.505 1.082.977 1.401.472.319.984.478 1.538.477a2.84 2.84 0 0 0 1.293-.291c.382-.193.684-.458.902-.794.218-.336.327-.72.327-1.149 0-.429-.115-.797-.344-1.105a2.067 2.067 0 0 0-.881-.689zm2.093-1.931l.602.913L15 10.045v5.744h1.187V8.446h-.827l-2.158 1.557zM22.105 0h-3.289v5.184H24V1.895A1.894 1.894 0 0 0 22.105 0zm-3.289 23.5l4.684-4.684h-4.684V23.5zM0 22.105C0 23.152.848 24 1.895 24h3.289v-5.184H0v3.289z", "googlekeep": "M4.908 0c-.904 0-1.635.733-1.635 1.637v20.726c0 .904.732 1.637 1.635 1.637H19.09c.904 0 1.637-.733 1.637-1.637V6.5h-6.5V0H4.908zm9.819 0v6h6l-6-6zM11.97 8.229c.224 0 .571.031.765.072.2.04.576.185.842.312.828.414 1.467 1.164 1.774 2.088.168.511.188 1.34.05 1.865a3.752 3.752 0 0 1-1.277 1.952l-.25.193h-1.87c-2.134 0-1.931.042-2.478-.494a3.349 3.349 0 0 1-.984-1.844c-.148-.766-.053-1.437.32-2.203.19-.399.303-.556.65-.899.68-.679 1.513-1.037 2.458-1.042zm-1.866 7.863h3.781v1.328h-3.779v-1.328z", "gmail": "M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z", "googlepay": "M3.963 7.235A3.963 3.963 0 00.422 9.419a3.963 3.963 0 000 3.559 3.963 3.963 0 003.541 2.184c1.07 0 1.97-.352 2.627-.957.748-.69 1.18-1.71 1.18-2.916a4.722 4.722 0 00-.07-.806H3.964v1.526h2.14a1.835 1.835 0 01-.79 1.205c-.356.241-.814.379-1.35.379-1.034 0-1.911-.697-2.225-1.636a2.375 2.375 0 010-1.517c.314-.94 1.191-1.636 2.225-1.636a2.152 2.152 0 011.52.594l1.132-1.13a3.808 3.808 0 00-2.652-1.033zm6.501.55v6.9h.886V11.89h1.465c.603 0 1.11-.196 1.522-.588a1.911 1.911 0 00.635-1.464 1.92 1.92 0 00-.635-1.456 2.125 2.125 0 00-1.522-.598zm2.427.85a1.156 1.156 0 01.823.365 1.176 1.176 0 010 1.686 1.171 1.171 0 01-.877.357H11.35V8.635h1.487a1.156 1.156 0 01.054 0zm4.124 1.175c-.842 0-1.477.308-1.907.925l.781.491c.288-.417.68-.626 1.175-.626a1.255 1.255 0 01.856.323 1.009 1.009 0 01.366.785v.202c-.34-.193-.774-.289-1.3-.289-.617 0-1.11.145-1.479.434-.37.288-.554.677-.554 1.165a1.476 1.476 0 00.525 1.156c.35.308.785.463 1.305.463.61 0 1.098-.27 1.465-.81h.038v.655h.848v-2.909c0-.61-.19-1.09-.568-1.44-.38-.35-.896-.525-1.551-.525zm2.263.154l1.946 4.422-1.098 2.38h.915L24 9.963h-.965l-1.368 3.391h-.02l-1.406-3.39zm-2.146 2.368c.494 0 .88.11 1.156.33 0 .372-.147.696-.44.973a1.413 1.413 0 01-.997.414 1.081 1.081 0 01-.69-.232.708.708 0 01-.293-.578c0-.257.12-.47.363-.647.24-.173.54-.26.9-.26Z", "android": "M18.4395 5.5586c-.675 1.1664-1.352 2.3318-2.0274 3.498-.0366-.0155-.0742-.0286-.1113-.043-1.8249-.6957-3.484-.8-4.42-.787-1.8551.0185-3.3544.4643-4.2597.8203-.084-.1494-1.7526-3.021-2.0215-3.4864a1.1451 1.1451 0 0 0-.1406-.1914c-.3312-.364-.9054-.4859-1.379-.203-.475.282-.7136.9361-.3886 1.5019 1.9466 3.3696-.0966-.2158 1.9473 3.3593.0172.031-.4946.2642-1.3926 1.0177C2.8987 12.176.452 14.772 0 18.9902h24c-.119-1.1108-.3686-2.099-.7461-3.0683-.7438-1.9118-1.8435-3.2928-2.7402-4.1836a12.1048 12.1048 0 0 0-2.1309-1.6875c.6594-1.122 1.312-2.2559 1.9649-3.3848.2077-.3615.1886-.7956-.0079-1.1191a1.1001 1.1001 0 0 0-.8515-.5332c-.5225-.0536-.9392.3128-1.0488.5449zm-.0391 8.461c.3944.5926.324 1.3306-.1563 1.6503-.4799.3197-1.188.0985-1.582-.4941-.3944-.5927-.324-1.3307.1563-1.6504.4727-.315 1.1812-.1086 1.582.4941zM7.207 13.5273c.4803.3197.5506 1.0577.1563 1.6504-.394.5926-1.1038.8138-1.584.4941-.48-.3197-.5503-1.0577-.1563-1.6504.4008-.6021 1.1087-.8106 1.584-.4941z", "googlegemini": "M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81", "fitbit": "M13.298 1.825c0 .976-.81 1.785-1.786 1.785-.972 0-1.784-.81-1.784-1.785 0-.973.813-1.785 1.784-1.785.976 0 1.786.813 1.786 1.785zm-1.786 3.243c-1.052 0-1.863.81-1.863 1.866 0 1.053.81 1.865 1.865 1.865 1.053 0 1.865-.811 1.865-1.865s-.825-1.866-1.875-1.866h.008zm0 5.029c-1.052 0-1.945.891-1.945 1.945s.894 1.945 1.947 1.945 1.946-.891 1.946-1.945-.894-1.945-1.946-1.945h-.002zm0 5.107c-1.052 0-1.863.81-1.863 1.864s.81 1.866 1.865 1.866c1.053 0 1.865-.811 1.865-1.866 0-.972-.825-1.864-1.875-1.864h.008zm0 5.191c-.972 0-1.784.809-1.784 1.784 0 .97.813 1.781 1.784 1.781.977 0 1.786-.809 1.786-1.784 0-.973-.81-1.781-1.786-1.781zM16.46 4.823c-1.136 0-2.108.977-2.108 2.111 0 1.134.973 2.107 2.108 2.107 1.135 0 2.106-.975 2.106-2.107 0-1.135-.972-2.109-2.106-2.109v-.002zm0 5.03c-1.216 0-2.19.973-2.19 2.19 0 1.216.975 2.187 2.19 2.187 1.215 0 2.189-.971 2.189-2.189 0-1.216-.974-2.188-2.189-2.188zm0 5.108c-1.136 0-2.108.976-2.108 2.107 0 1.135.973 2.109 2.108 2.109 1.135 0 2.106-.976 2.106-2.109s-.971-2.107-2.106-2.107zm5.106-5.353c-1.296 0-2.43 1.055-2.43 2.434 0 1.297 1.051 2.433 2.43 2.433 1.381 0 2.434-1.065 2.434-2.444-.082-1.382-1.135-2.431-2.434-2.431v.008zM6.486 5.312c-.892 0-1.62.73-1.62 1.623 0 .891.729 1.62 1.62 1.62.893 0 1.619-.729 1.619-1.62 0-.893-.727-1.62-1.619-1.62v-.003zm0 5.027c-.973 0-1.703.729-1.703 1.703 0 .975.721 1.703 1.695 1.703s1.695-.73 1.695-1.703c0-.975-.735-1.703-1.71-1.703h.023zm0 5.107c-.892 0-1.62.731-1.62 1.62 0 .895.729 1.623 1.62 1.623.893 0 1.619-.735 1.619-1.635s-.727-1.62-1.619-1.62v.012zm-5.025-4.863c-.813 0-1.461.646-1.461 1.459 0 .81.648 1.459 1.46 1.459.81 0 1.459-.648 1.459-1.459s-.648-1.459-1.458-1.459z", "googlemessages": "M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zM4.911 7.089h11.456a2.197 2.197 0 0 1 2.165 2.19v5.863a2.213 2.213 0 0 1-2.177 2.178H8.04c-1.174 0-2.04-.99-2.04-2.178v-4.639L4.503 7.905c-.31-.42-.05-.816.408-.816zm3.415 2.19c-.347 0-.68.21-.68.544 0 .334.333.544.68.544h7.905c.346 0 .68-.21.68-.544 0-.334-.334-.545-.68-.545zm0 2.177c-.347 0-.68.21-.68.544 0 .334.333.544.68.544h7.905c.346 0 .68-.21.68-.544 0-.334-.334-.544-.68-.544zm-.013 2.19c-.346 0-.68.21-.68.544 0 .334.334.544.68.544h5.728c.347 0 .68-.21.68-.544 0-.334-.333-.545-.68-.545z", "googlemaps": "M19.527 4.799c1.212 2.608.937 5.678-.405 8.173-1.101 2.047-2.744 3.74-4.098 5.614-.619.858-1.244 1.75-1.669 2.727-.141.325-.263.658-.383.992-.121.333-.224.673-.34 1.008-.109.314-.236.684-.627.687h-.007c-.466-.001-.579-.53-.695-.887-.284-.874-.581-1.713-1.019-2.525-.51-.944-1.145-1.817-1.79-2.671L19.527 4.799zM8.545 7.705l-3.959 4.707c.724 1.54 1.821 2.863 2.871 4.18.247.31.494.622.737.936l4.984-5.925-.029.01c-1.741.601-3.691-.291-4.392-1.987a3.377 3.377 0 0 1-.209-.716c-.063-.437-.077-.761-.004-1.198l.001-.007zM5.492 3.149l-.003.004c-1.947 2.466-2.281 5.88-1.117 8.77l4.785-5.689-.058-.05-3.607-3.035zM14.661.436l-3.838 4.563a.295.295 0 0 1 .027-.01c1.6-.551 3.403.15 4.22 1.626.176.319.323.683.377 1.045.068.446.085.773.012 1.22l-.003.016 3.836-4.561A8.382 8.382 0 0 0 14.67.439l-.009-.003zM9.466 5.868L14.162.285l-.047-.012A8.31 8.31 0 0 0 11.986 0a8.439 8.439 0 0 0-6.169 2.766l-.016.018 3.665 3.084z", "telegram": "M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z", "googleplay": "M22.018 13.298l-3.919 2.218-3.515-3.493 3.543-3.521 3.891 2.202a1.49 1.49 0 0 1 0 2.594zM1.337.924a1.486 1.486 0 0 0-.112.568v21.017c0 .217.045.419.124.6l11.155-11.087L1.337.924zm12.207 10.065l3.258-3.238L3.45.195a1.466 1.466 0 0 0-.946-.179l11.04 10.973zm0 2.067l-11 10.933c.298.036.612-.016.906-.183l13.324-7.54-3.23-3.21z", "spotify": "M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z", "googledrive": "M12.01 1.485c-2.082 0-3.754.02-3.743.047.01.02 1.708 3.001 3.774 6.62l3.76 6.574h3.76c2.081 0 3.753-.02 3.742-.047-.005-.02-1.708-3.001-3.775-6.62l-3.76-6.574zm-4.76 1.73a789.828 789.861 0 0 0-3.63 6.319L0 15.868l1.89 3.298 1.885 3.297 3.62-6.335 3.618-6.33-1.88-3.287C8.1 4.704 7.255 3.22 7.25 3.214zm2.259 12.653-.203.348c-.114.198-.96 1.672-1.88 3.287a423.93 423.948 0 0 1-1.698 2.97c-.01.026 3.24.042 7.222.042h7.244l1.796-3.157c.992-1.734 1.85-3.23 1.906-3.323l.104-.167h-7.249z", "paypal": "M7.016 19.198h-4.2a.562.562 0 0 1-.555-.65L5.093.584A.692.692 0 0 1 5.776 0h7.222c3.417 0 5.904 2.488 5.846 5.5-.006.25-.027.5-.066.747A6.794 6.794 0 0 1 12.071 12H8.743a.69.69 0 0 0-.682.583l-.325 2.056-.013.083-.692 4.39-.015.087zM19.79 6.142c-.01.087-.01.175-.023.261a7.76 7.76 0 0 1-7.695 6.598H9.007l-.283 1.795-.013.083-.692 4.39-.134.843-.014.088H6.86l-.497 3.15a.562.562 0 0 0 .555.65h3.612c.34 0 .63-.249.683-.585l.952-6.031a.692.692 0 0 1 .683-.584h2.126a6.793 6.793 0 0 0 6.707-5.752c.306-1.95-.466-3.744-1.89-4.906z", "amazon": "M.045 18.02c.072-.116.187-.124.348-.022 3.636 2.11 7.594 3.166 11.87 3.166 2.852 0 5.668-.533 8.447-1.595l.315-.14c.138-.06.234-.1.293-.13.226-.088.39-.046.525.13.12.174.09.336-.12.48-.256.19-.6.41-1.006.654-1.244.743-2.64 1.316-4.185 1.726a17.617 17.617 0 01-10.951-.577 17.88 17.88 0 01-5.43-3.35c-.1-.074-.151-.15-.151-.22 0-.047.021-.09.051-.13zm6.565-6.218c0-1.005.247-1.863.743-2.577.495-.71 1.17-1.25 2.04-1.615.796-.335 1.756-.575 2.912-.72.39-.046 1.033-.103 1.92-.174v-.37c0-.93-.105-1.558-.3-1.875-.302-.43-.78-.65-1.44-.65h-.182c-.48.046-.896.196-1.246.46-.35.27-.575.63-.675 1.096-.06.3-.206.465-.435.51l-2.52-.315c-.248-.06-.372-.18-.372-.39 0-.046.007-.09.022-.15.247-1.29.855-2.25 1.82-2.88.976-.616 2.1-.975 3.39-1.05h.54c1.65 0 2.957.434 3.888 1.29.135.15.27.3.405.48.12.165.224.314.283.45.075.134.15.33.195.57.06.254.105.42.135.51.03.104.062.3.076.615.01.313.02.493.02.553v5.28c0 .376.06.72.165 1.036.105.313.21.54.315.674l.51.674c.09.136.136.256.136.36 0 .12-.06.226-.18.314-1.2 1.05-1.86 1.62-1.963 1.71-.165.135-.375.15-.63.045a6.062 6.062 0 01-.526-.496l-.31-.347a9.391 9.391 0 01-.317-.42l-.3-.435c-.81.886-1.603 1.44-2.4 1.665-.494.15-1.093.227-1.83.227-1.11 0-2.04-.343-2.76-1.034-.72-.69-1.08-1.665-1.08-2.94l-.05-.076zm3.753-.438c0 .566.14 1.02.425 1.364.285.34.675.512 1.155.512.045 0 .106-.007.195-.02.09-.016.134-.023.166-.023.614-.16 1.08-.553 1.424-1.178.165-.28.285-.58.36-.91.09-.32.12-.59.135-.8.015-.195.015-.54.015-1.005v-.54c-.84 0-1.484.06-1.92.18-1.275.36-1.92 1.17-1.92 2.43l-.035-.02zm9.162 7.027c.03-.06.075-.11.132-.17.362-.243.714-.41 1.05-.5a8.094 8.094 0 011.612-.24c.14-.012.28 0 .41.03.65.06 1.05.168 1.172.33.063.09.099.228.099.39v.15c0 .51-.149 1.11-.424 1.8-.278.69-.664 1.248-1.156 1.68-.073.06-.14.09-.197.09-.03 0-.06 0-.09-.012-.09-.044-.107-.12-.064-.24.54-1.26.806-2.143.806-2.64 0-.15-.03-.27-.087-.344-.145-.166-.55-.257-1.224-.257-.243 0-.533.016-.87.046-.363.045-.7.09-1 .135-.09 0-.148-.014-.18-.044-.03-.03-.036-.047-.02-.077 0-.017.006-.03.02-.063v-.06z", "whatsapp": "M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z", "googlephotos": "M12.678 16.672c0 2.175.002 4.565-.001 6.494-.001.576-.244.814-.817.833-7.045.078-8.927-7.871-4.468-11.334-1.95.016-4.019.007-5.986.007-1.351 0-1.414-.01-1.405-1.351.258-6.583 7.946-8.275 11.323-3.936L11.308.928c-.001-.695.212-.906.906-.925 6.409-.187 9.16 7.308 4.426 11.326l6.131.002c1.097 0 1.241.105 1.228 1.217-.223 6.723-7.802 8.376-11.321 4.124zm.002-15.284l-.003 9.972c6.56-.465 6.598-9.532.003-9.972zm-1.36 21.224l-.001-9.97c-6.927.598-6.29 9.726.002 9.97zM1.4 11.315l9.95.008c-.527-6.829-9.762-6.367-9.95-.008zm11.238 1.365c.682 6.875 9.67 6.284 9.977.01z", "youtube": "M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z", "uber": "M0 7.97v4.958c0 1.867 1.302 3.101 3 3.101.826 0 1.562-.316 2.094-.87v.736H6.27V7.97H5.082v4.888c0 1.257-.85 2.106-1.947 2.106-1.11 0-1.946-.827-1.946-2.106V7.971H0zm7.44 0v7.925h1.13v-.725c.521.532 1.257.86 2.06.86a3.006 3.006 0 0 0 3.034-3.01 3.01 3.01 0 0 0-3.033-3.024 2.86 2.86 0 0 0-2.049.861V7.971H7.439zm9.869 2.038c-1.687 0-2.965 1.37-2.965 3 0 1.72 1.334 3.01 3.066 3.01 1.053 0 1.913-.463 2.49-1.233l-.826-.611c-.43.577-.996.847-1.664.847-.973 0-1.753-.7-1.912-1.64h4.697v-.373c0-1.72-1.222-3-2.886-3zm6.295.068c-.634 0-1.098.294-1.381.758v-.713h-1.131v5.774h1.142V12.61c0-.894.544-1.47 1.291-1.47H24v-1.065h-.396zm-6.319.928c.85 0 1.564.588 1.756 1.47H15.52c.203-.882.916-1.47 1.765-1.47zm-6.732.012c1.086 0 1.98.883 1.98 2.004a1.993 1.993 0 0 1-1.98 2.001A1.989 1.989 0 0 1 8.56 13.02a1.99 1.99 0 0 1 1.992-2.004z", "googlechrome": "M12 0C8.21 0 4.831 1.757 2.632 4.501l3.953 6.848A5.454 5.454 0 0 1 12 6.545h10.691A12 12 0 0 0 12 0zM1.931 5.47A11.943 11.943 0 0 0 0 12c0 6.012 4.42 10.991 10.189 11.864l3.953-6.847a5.45 5.45 0 0 1-6.865-2.29zm13.342 2.166a5.446 5.446 0 0 1 1.45 7.09l.002.001h-.002l-5.344 9.257c.206.01.413.016.621.016 6.627 0 12-5.373 12-12 0-1.54-.29-3.011-.818-4.364zM12 16.364a4.364 4.364 0 1 1 0-8.728 4.364 4.364 0 0 1 0 8.728Z", "googlehome": "M12 0a1.44 1.44 0 0 0-.947.399L.547 10.762a1.26 1.26 0 0 0-.342.808v11.138c0 .768.53 1.292 1.311 1.292h20.968c.78 0 1.311-.522 1.311-1.292V11.57a1.25 1.25 0 0 0-.34-.804L15.68 3.097h-.001L12.947.4A1.454 1.454 0 0 0 12 0Zm0 6.727 6.552 6.456v5.65H5.446v-5.65z"};
+const icon=n=>{const d=PATH[SLUG[n]];return d?`<span class="ic"><svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path fill="currentColor" d="${d}"/></svg></span>`:`<span class="ic blank"></span>`};
+const esc=s=>s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const hit=(n,q)=>{n=n.toLowerCase();return n.startsWith(q)||n.split(" ").some(w=>w.startsWith(q))};
+function hl(name,q){if(!q)return esc(name);let at=-1,pos=0;for(const w of name.split(" ")){if(w.toLowerCase().startsWith(q)){at=pos;break}pos+=w.length+1}
+  return at<0?esc(name):esc(name.slice(0,at))+"<mark>"+esc(name.slice(at,at+q.length))+"</mark>"+esc(name.slice(at+q.length))}
+const SHORTCUTS={WhatsApp:["New chat","Camera"],Maps:["Home","Work"],Spotify:["Search"],Uber:["Ride home"],Telegram:["New message"],Chrome:["New incognito tab"]};
+const row=(p,q,index)=>`<div class="item" data-index="${index}" role="button" tabindex="0">${p.made?`<span class="ic"><span class="made" style="margin:0;width:7px;height:7px"></span></span>`:icon(p.n)}<span>${hl(p.n,q)}</span>${p.s?`<span class="sub">· ${esc(p.s)}</span>`:""}</div>`;
+// column-reverse: the first child sits at the bottom, next to the field.
+function results(pins,text){
+  const q=text.trim().toLowerCase();
+  const apps=ALL.filter(n=>!pins.some(p=>p.n===n&&!p.s));
+  return {
+    pins:pins.filter(p=>!q||hit(p.n,q)||(p.s&&hit(p.s,q))),
+    apps:apps.filter(n=>!q||hit(n,q)).map(n=>({n}))
+  };
+}
+const clamp=x=>Math.max(0,Math.min(1,x));
+const reducedMotion=matchMedia("(prefers-reduced-motion: reduce)");
+// One analytic, critically damped spring drives both custom properties.
+function spring(el,key,to,velocity=0){
+  el.springs ||= {};
+  cancelAnimationFrame(el.springs[key]);
+  const from=parseFloat(el.style.getPropertyValue(`--${key}`));
+  const set=x=>el.style.setProperty(`--${key}`,x);
+  if(reducedMotion.matches){set(to);return}
+  const omega=19,c1=from-to,c2=velocity+omega*c1,start=performance.now();
+  function frame(now){
+    const t=(now-start)/1000;
+    const x=to+(c1+c2*t)*Math.exp(-omega*t);
+    if(t>=.8||(Math.abs(x-to)<.001&&Math.abs((c2-omega*(c1+c2*t))*Math.exp(-omega*t))<.02)){
+      set(to);return;
+    }
+    set(clamp(x));
+    el.springs[key]=requestAnimationFrame(frame);
+  }
+  el.springs[key]=requestAnimationFrame(frame);
+}
+const KBD=`<div class="kbd"><div>${[..."qwertyuiop"].map(k=>`<span>${k}</span>`).join("")}</div><div>${[..."asdfghjkl"].map(k=>`<span>${k}</span>`).join("")}</div><div>${[..."zxcvbnm"].map(k=>`<span>${k}</span>`).join("")}</div><div><span>123</span><span class="wide">English</span><span>↵</span></div></div>`;
+const ASK="What should we do?", FIND="Search apps";
+const phoneHTML=()=>`<div class="status"><span>16:09</span><span><i></i></span></div>
+  <div class="home"><div class="clock">16:09</div><div class="day">Wednesday</div>
+    <div class="widget"><div class="l">Steps<span class="made" title="Made by Misura"></span></div><div class="v">6,412<small>today</small></div></div>
+    <div class="earlier">Earlier ›</div></div>
+  <div class="list"></div>
+  <div class="field"><span class="q"></span><input placeholder="${ASK}" aria-label="${ASK}"><button class="go">Go →</button></div>
+  ${KBD}<div class="gbar"></div>
+  <div class="scrim"></div><div class="menu" role="menu"></div><div class="toast" role="status" aria-live="polite"></div>`;
+function wire(el,state){
+  el.innerHTML=phoneHTML();
+  const list=el.querySelector(".list"),inp=el.querySelector("input"),field=el.querySelector(".field");
+  const menu=el.querySelector(".menu"),scrim=el.querySelector(".scrim"),toast=el.querySelector(".toast");
+  let pins=PINNED.map(p=>({...p})),visible=[],selected=null,gesture=null,holdTimer,toastTimer;
+  el.style.setProperty("--p",state&&state!=="home"?1:0);
+  el.style.setProperty("--k",state==="scrolled"?0:1);
+  function mode(on){
+    el.classList.toggle("open",on);
+    inp.placeholder=on?FIND:ASK;
+    inp.setAttribute("aria-label",inp.placeholder);
+  }
+  function render(){
+    const text=el.classList.contains("open")?inp.value:"",q=text.trim().toLowerCase();
+    const groups=results(pins,text);
+    visible=[...groups.pins,...groups.apps];
+    let index=0;
+    const rows=items=>items.map(p=>row(p,q,index++)).join("");
+    list.innerHTML=q?rows(visible):rows(groups.pins)+(groups.pins.length?'<div class="sec">Pinned</div>':"")+rows(groups.apps)+'<div class="sec">All apps</div>';
+    if(!visible.length)list.innerHTML=`<div class="none">No app called “${esc(text.trim())}”</div>`;
+    if(q)list.querySelector(".item")?.classList.add("top");
+    field.classList.toggle("has",!!inp.value.trim());
+  }
+  function closeMenu(){
+    clearTimeout(holdTimer);
+    list.querySelector(".held")?.classList.remove("held");
+    menu.classList.remove("on");
+    scrim.classList.remove("on");
+    selected=null;
+  }
+  function feedback(text){
+    clearTimeout(toastTimer);
+    toast.textContent=text;
+    toast.classList.add("on");
+    toastTimer=setTimeout(()=>toast.classList.remove("on"),1700);
+  }
+  function settle(on,velocity=0){
+    closeMenu();
+    mode(on);
+    if(!on){
+      inp.value="";
+      inp.blur();
+      spring(el,"k",1);
+    }
+    render();
+    spring(el,"p",on?1:0,velocity);
+    if(on)inp.focus({preventScroll:true});
+  }
+  function launch(p){
+    if(!p)return;
+    feedback(`Opens ${p.n}`);
+    settle(false);
+  }
+  function showMenu(item){
+    closeMenu();
+    selected=visible[Number(item.dataset.index)];
+    const p=selected;
+    item.classList.add("held");
+    const pinned=pins.some(pin=>pin.n===p.n&&pin.s===p.s);
+    const shortcuts=p.made?[]:(SHORTCUTS[p.n]||[]);
+    menu.innerHTML=shortcuts.map(name=>`<div class="sh" role="menuitem" tabindex="0" data-action="shortcut">${esc(name)}</div>`).join("")+
+      (shortcuts.length?"<hr>":"")+`<div class="meta" role="menuitem" tabindex="0" data-action="pin">${pinned?"Unpin":"Pin"}</div><div class="meta" role="menuitem" tabindex="0" data-action="info">${p.made?"About this":"App info"}</div>`;
+    menu.classList.add("on");
+    scrim.classList.add("on");
+    const bounds=el.getBoundingClientRect(),rect=item.getBoundingClientRect();
+    const scale=bounds.height/el.offsetHeight;
+    const top=(rect.top-bounds.top)/scale-menu.offsetHeight-8;
+    menu.style.top=`${Math.max(32,Math.min(el.clientHeight-menu.offsetHeight-16,top))}px`;
+  }
+  mode(!!state&&state!=="home");
+  if(state==="ur")inp.value="ur";
+  render();
+  if(state){
+    inp.readOnly=true;
+    el.style.pointerEvents="none";
+    el.setAttribute("inert","");
+    if(state==="scrolled")list.scrollTop=-160;
+    if(state==="menu")showMenu([...list.querySelectorAll(".item")].find(item=>visible[Number(item.dataset.index)].n==="WhatsApp"));
+    return;
+  }
+  function keyboard(up){
+    spring(el,"k",up?1:0);
+    if(up)inp.focus({preventScroll:true});else inp.blur();
+  }
+  function cancelHold(){clearTimeout(holdTimer)}
+  list.addEventListener("wheel",()=>{cancelHold();keyboard(false)},{passive:true});
+  list.addEventListener("touchmove",()=>{cancelHold();keyboard(false)},{passive:true});
+  field.addEventListener("click",e=>{if(!e.target.closest("button"))keyboard(true)});
+  inp.addEventListener("focus",()=>spring(el,"k",1));
+  inp.addEventListener("input",()=>{closeMenu();render();list.scrollTop=0});
+  inp.addEventListener("keydown",e=>{
+    if(e.key==="Enter"&&el.classList.contains("open")){
+      e.preventDefault();
+      if(inp.value.trim())launch(visible[0]);
+    }
+  });
+  list.addEventListener("keydown",e=>{
+    const item=e.target.closest(".item");
+    if(item&&(e.key==="Enter"||e.key===" ")){e.preventDefault();launch(visible[Number(item.dataset.index)])}
+  });
+  el.addEventListener("contextmenu",e=>e.preventDefault());
+  scrim.addEventListener("click",closeMenu);
+  function choose(action){
+    if(!selected)return;
+    const p=selected;
+    if(action.dataset.action==="pin"){
+      const index=pins.findIndex(pin=>pin.n===p.n&&pin.s===p.s);
+      if(index<0)pins.push({...p});else pins.splice(index,1);
+      feedback(`${index<0?"Pinned":"Unpinned"} ${p.n}`);
+      closeMenu();
+      render();
+    }else{
+      feedback(action.dataset.action==="shortcut"?`Opens ${p.n} · ${action.textContent}`:`${action.textContent}: ${p.n}`);
+      closeMenu();
+    }
+  }
+  menu.addEventListener("click",e=>{const action=e.target.closest("[data-action]");if(action)choose(action)});
+  menu.addEventListener("keydown",e=>{
+    if(e.key==="Enter"||e.key===" "){
+      const action=e.target.closest("[data-action]");
+      if(action){e.preventDefault();choose(action)}
+    }
+  });
+  el.addEventListener("pointerdown",e=>{
+    if(gesture||!e.isPrimary||e.button!==0||e.target.closest("input,button,.field,.menu,.scrim"))return;
+    const item=e.target.closest(".item"),inList=list.contains(e.target);
+    const canDrag=!inList||list.scrollTop>=-2;
+    const start=parseFloat(el.style.getPropertyValue("--p"));
+    if(canDrag)cancelAnimationFrame(el.springs?.p);
+    gesture={id:e.pointerId,x:e.clientX,y:e.clientY,lastY:e.clientY,time:e.timeStamp,start,
+      direction:el.classList.contains("open")?-1:1,velocity:0,moved:false,held:false,item,canDrag,inList};
+    el.setPointerCapture(e.pointerId);
+    if(item)holdTimer=setTimeout(()=>{
+      if(!gesture||gesture.moved)return;
+      gesture.held=true;
+      showMenu(item);
+    },450);
+  });
+  el.addEventListener("pointermove",e=>{
+    const g=gesture;
+    if(!g||g.id!==e.pointerId||g.held)return;
+    const dy=e.clientY-g.y,step=e.clientY-g.lastY,dt=e.timeStamp-g.time;
+    if(Math.hypot(e.clientX-g.x,dy)>8){g.moved=true;cancelHold()}
+    if(dt>0)g.velocity=g.direction*step/260/(dt/1000);
+    g.lastY=e.clientY;
+    g.time=e.timeStamp;
+    if(g.canDrag){
+      const p=clamp(g.start+g.direction*dy/260);
+      el.style.setProperty("--p",p);
+      const on=p>.5;
+      if(el.classList.contains("open")!==on){mode(on);render()}
+    }else if(g.moved&&g.inList&&e.pointerType==="touch"){
+      // The phone disables native touch gestures, so move its reverse list directly.
+      list.scrollTop-=step;
+    }
+  });
+  function release(e,cancelled=false){
+    const g=gesture;
+    if(!g||g.id!==e.pointerId)return;
+    gesture=null;
+    cancelHold();
+    if(el.hasPointerCapture(e.pointerId))el.releasePointerCapture(e.pointerId);
+    if(g.held)return;
+    if(g.canDrag&&(g.moved||!g.item)){
+      const p=parseFloat(el.style.getPropertyValue("--p"));
+      const v=cancelled||e.timeStamp-g.time>100?0:g.velocity;
+      const on=cancelled?g.start>.5:Math.abs(v)>1.5?v>0:p>.5;
+      settle(on,v);
+    }else if(!cancelled&&!g.moved&&g.item){
+      launch(visible[Number(g.item.dataset.index)]);
+    }
+  }
+  el.addEventListener("pointerup",e=>release(e));
+  el.addEventListener("pointercancel",e=>release(e,true));
+  el.addEventListener("lostpointercapture",e=>release(e,true));
+  document.addEventListener("keydown",e=>{
+    if(e.key==="Escape"){gesture=null;cancelHold();settle(false)}
+  });
+}
+wire(document.getElementById("live"));
+document.querySelectorAll(".phone[data-state]").forEach(el=>wire(el,el.dataset.state));
+</script>
+</body>
+</html>

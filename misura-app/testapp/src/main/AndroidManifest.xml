@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <application android:label="TestChat" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity android:name=".ChatActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="testchat" android:host="chat" />
+            </intent-filter>
+        </activity>
+        <receiver android:name=".PostReceiver" android:exported="true">
+            <intent-filter><action android:name="com.misura.testapp.POST" /></intent-filter>
+        </receiver>
+        <receiver android:name=".ReplyReceiver" android:exported="false" />
+        <receiver android:name=".FlipReceiver" android:exported="true">
+            <intent-filter><action android:name="com.misura.testapp.FLIP" /></intent-filter>
+        </receiver>
+    </application>
+</manifest>

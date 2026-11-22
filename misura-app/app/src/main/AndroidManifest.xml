@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Routines run at the time the user saved (one exact alarm for the soonest). Sideloaded/source build; not a Play listing. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <queries><package android:name="com.misura.testapp" /><!-- catalogued banking/payment apps (access/AppAccess.kt FINANCE): settings lists installed ones even without a launcher icon --><package android:name="com.paypal.android.p2pmobile" /><package android:name="com.google.android.apps.walletnfcrel" /><package android:name="com.revolut.revolut" /><package android:name="com.transferwise.android" /><package android:name="com.klarna.android" /><package android:name="de.number26.android" /><package android:name="de.dkb.portalapp" /><package android:name="com.starfinanz.smob.android.sfinanzstatus" /><package android:name="de.commerzbanking.mobil" /><package android:name="com.db.pwcc.dbmobile" /><package android:name="de.ingdiba.bankingapp" /><package android:name="de.comdirect.android" /><package android:name="de.consorsbank" /><package android:name="de.postbank.finanzassistent" /><package android:name="de.traderepublic.app" /><package android:name="co.uk.getmondo" /><package android:name="com.starlingbank.android" /><package android:name="com.barclays.android.barclaysmobilebanking" /><package android:name="com.chase.sig.android" /><package android:name="com.wf.wellsfargomobile" /><package android:name="com.infonow.bofa" /><package android:name="com.venmo" /><package android:name="com.squareup.cash" /><package android:name="com.coinbase.android" /><package android:name="com.binance.dev" /><package android:name="com.bunq.android" /><package android:name="com.ing.mobile" /><package android:name="nl.rabomobiel" /><package android:name="com.abnamro.nl.mobile.payments" /><package android:name="com.citi.citimobile" /><package android:name="com.konylabs.capitalone" /><package android:name="com.usbank.mobilebanking" /><package android:name="com.pnc.ecommerce.mobile" /><package android:name="com.tdbank" /><package android:name="com.ally.MobileBanking" /><package android:name="com.bbt.myfi" /><package android:name="com.discoverfinancial.mobile" /><package android:name="com.americanexpress.android.acctsvcs.us" /><package android:name="com.samsung.android.spay" /><package android:name="com.google.android.apps.nbu.paisa.user" /><package android:name="net.one97.paytm" /><package android:name="com.phonepe.app" /><package android:name="com.eg.android.AlipayGphone" /><package android:name="org.toshi" /><package android:name="io.metamask" /><package android:name="com.wallet.crypto.trustapp" /><package android:name="piuk.blockchain.android" /><package android:name="com.whatsapp" /><package android:name="com.google.android.apps.maps" /><intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent><intent><action android:name="android.speech.RecognitionService" /></intent></queries>
+    <application
+        android:name=".MisuraApp"
+        android:label="Misura"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:usesCleartextTraffic="false"
+        android:theme="@android:style/Theme.Material.NoActionBar">
+        <activity android:name=".setup.SetupActivity" android:exported="false"
+            android:excludeFromRecents="true" android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".HomeActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:excludeFromRecents="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <service
+            android:name=".notify.MisuraListener"
+            android:exported="true"
+            android:label="Misura"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
+        </service>
+        <service android:name=".work.WorkingService" android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Keeps an approved message send or delivery check alive until it is confirmed, and a routine the user scheduled alive while it runs." />
+        </service>
+        <receiver android:name=".routine.RoutineAlarmReceiver" android:exported="false" />
+        <!-- Boot, app update, clock and alarm-permission changes (protected system broadcasts). -->
+        <receiver android:name=".routine.RoutineReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+        <receiver android:name=".work.BootReceiver" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
+        </receiver>
+        <service
+            android:name=".hidden.MisuraAccessibility"
+            android:exported="false"
+            android:label="Misura"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/misura_accessibility" />
+        </service>
+        <activity
+            android:name=".sleep.SleepActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.misura.phone.sleep"
+            android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen" />
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+    </application>
+</manifest>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="conversation_title" type="id" />
+    <item name="message_text" type="id" />
+    <item name="entry" type="id" />
+    <item name="send" type="id" />
+    <item name="conv_name" type="id" />
+    <item name="status" type="id" />
+    <item name="search_box" type="id" />
+    <item name="note" type="id" />
+</resources>

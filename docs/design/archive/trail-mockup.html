@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --screen: oklch(0.13 0.004 60);
+    --surface: oklch(0.31 0.005 60);
+    --paper: oklch(0.95 0.003 90);
+    --ink: oklch(0.17 0.004 60);
+    --text: oklch(0.95 0.003 90);
+    --text-2: oklch(0.74 0.004 60);
+    --o: oklch(0.66 0.21 40);
+    --page: oklch(0.92 0.004 90);
+    --R: 17px; --m: 6px; --p: 6px;
+    --card-r: calc(var(--R) - var(--m));   /* 20 */
+    --btn-r: calc(var(--card-r) - var(--p)); /* 12 */
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--page); font-family:"Hanken Grotesk",system-ui,sans-serif; color:var(--ink); padding:32px; }
+  h1 { font-weight:800; font-size:26px; margin:0 0 6px; letter-spacing:-.02em; }
+  h2 { font-weight:700; font-size:18px; margin:40px 0 6px; }
+  .sub { color:oklch(0.42 0.004 60); margin:0 0 18px; font-size:15px; max-width:92ch; line-height:1.45; }
+  .rules { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:8px; max-width:1100px; }
+  .rules div { background:var(--paper); border-radius:var(--card-r); padding:14px 16px; font-size:14px; line-height:1.45; }
+  .rules b { display:block; font-size:15px; margin-bottom:3px; }
+
+  .types { display:grid; grid-template-columns:repeat(auto-fill,minmax(232px,1fr)); gap:18px; }
+  .type { background:var(--screen); border-radius:var(--R); padding:var(--m); display:flex; flex-direction:column; gap:12px; }
+  .type .meta { color:var(--text); padding:0 6px 6px; }
+  .type .meta b { font-size:14px; font-weight:700; display:block; }
+  .type .meta span { font-size:12px; color:var(--text-2); line-height:1.35; display:block; margin-top:3px; }
+
+  /* one card = one surface. Text sits on it. Only tappable things are tiles. */
+  .card { background:var(--surface); color:var(--text); border-radius:var(--card-r); padding:var(--p); display:flex; flex-direction:column; gap:var(--p); }
+  .c { padding:6px 6px 2px; }                          /* content area: no box */
+  .src { font-size:11.5px; font-weight:600; color:var(--text-2); }
+  .who { font-size:16px; font-weight:700; margin-top:2px; }
+  .msg { font-size:14px; line-height:1.38; margin-top:8px; }
+  .word { font-size:32px; font-weight:800; letter-spacing:-.05em; line-height:.9; margin-top:8px; }
+  .line { font-size:13px; color:var(--text-2); margin-top:6px; }
+  .acts { display:flex; gap:var(--p); }
+  .btn { flex:1; border-radius:var(--btn-r); padding:13px 12px; font-size:14px; font-weight:700; background:var(--paper); color:var(--ink); display:flex; justify-content:space-between; align-items:center; gap:6px; white-space:nowrap; }
+  .btn.go { background:var(--o); flex:1.6; }
+  .btn.ghost { background:transparent; color:var(--text); box-shadow:inset 0 0 0 1.5px oklch(0.60 0.004 60); flex:.8; justify-content:center; }
+  .rows { display:flex; flex-direction:column; gap:4px; }
+  .row { border-radius:var(--btn-r); padding:11px 12px; background:var(--paper); color:var(--ink); font-size:14px; font-weight:600; display:flex; justify-content:space-between; }
+  .row small { font-weight:500; color:oklch(0.45 0.004 60); font-size:12px; }
+  .media { border-radius:var(--btn-r); overflow:hidden; position:relative; }
+  .media img { width:100%; height:100%; object-fit:cover; display:block; }
+  .photos { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; }
+  .photos .media { aspect-ratio:3/4; border-radius:var(--btn-r); }
+  .photos .nm { position:absolute; left:5px; bottom:5px; font-size:11px; font-weight:700; color:var(--ink); background:var(--paper); padding:2px 6px; border-radius:3px; }
+  .map { height:118px; background:oklch(0.22 0.004 60); }
+  .map svg { width:100%; height:100%; display:block; } .map .r { stroke:oklch(0.34 0.004 60); fill:none; stroke-linecap:round; }
+  .pin { position:absolute; transform:translate(-50%,-50%); width:18px; height:18px; border-radius:50%; background:var(--paper); color:var(--ink); font-size:10px; font-weight:800; display:grid; place-items:center; }
+  .bar { display:flex; gap:3px; margin-top:12px; } .bar i { flex:1; height:8px; border-radius:2px; background:oklch(0.42 0.004 60); } .bar i.on { background:var(--text); }
+  .status { display:flex; justify-content:space-between; font-size:14px; font-weight:600; margin-top:8px; }
+  .status i { font-style:normal; font-size:12px; color:var(--text-2); } .status i.y { color:var(--text); }
+  .slots { display:flex; gap:4px; } .slots .btn { justify-content:center; padding:13px 0; border-radius:var(--btn-r); }
+  .ctl { display:flex; gap:4px; } .ctl .btn { justify-content:center; border-radius:var(--btn-r); font-size:15px; }
+  .tick { display:inline-grid; place-items:center; width:22px; height:22px; border-radius:50%; background:var(--text); color:var(--ink); font-size:12px; font-weight:800; margin-right:8px; vertical-align:2px; }
+
+  .ba { display:flex; gap:28px; align-items:flex-start; flex-wrap:wrap; }
+  .ba > div { width:280px; }
+  .ba .lbl { font-size:13px; font-weight:700; margin-bottom:8px; }
+  .old .t { background:var(--paper); color:var(--ink); border-radius:5px; padding:10px 11px; }
+  .old { background:oklch(0.14 0.004 60); border-radius:var(--card-r); padding:3px; display:grid; gap:3px; grid-template-columns:1fr 1fr; }
+
+  .art { border-radius:var(--btn-r); overflow:hidden; } .art img { width:100%; height:100%; object-fit:cover; display:block; }
+  .scrub { margin-top:10px; } .scrub .track { height:4px; border-radius:2px; background:oklch(0.44 0.004 60); position:relative; }
+  .scrub .track i { position:absolute; left:0; top:0; bottom:0; width:38%; background:var(--text); border-radius:2px; }
+  .scrub .track b { position:absolute; left:38%; top:50%; width:12px; height:12px; margin:-6px 0 0 -6px; border-radius:50%; background:var(--text); }
+  .scrub .tm { display:flex; justify-content:space-between; font-size:11px; color:var(--text-2); margin-top:5px; font-variant-numeric:tabular-nums; }
+  .pc { display:grid; grid-template-columns:1fr 1fr 1.4fr 1fr 1fr; gap:4px; align-items:stretch; }
+  .pc .btn { justify-content:center; padding:12px 0; border-radius:var(--btn-r); font-size:15px; }
+  .pc .btn.big { font-size:20px; }
+  .pc .btn.ghost { box-shadow:none; background:transparent; color:var(--text-2); }
+  .sizes { display:grid; grid-template-columns:200px 250px 290px; gap:22px; align-items:end; }
+  .sizecol .cap { font-size:13px; color:oklch(0.36 0.004 60); margin-top:10px; line-height:1.4; } .sizecol .cap b { color:var(--ink); }
+  .scr { background:var(--screen); border-radius:var(--R); padding:var(--m); }
+  .q2 { display:flex; justify-content:space-between; font-size:13px; padding:9px 4px; color:var(--text); border-top:1px solid oklch(0.32 0.004 60); }
+  .q2 span { color:var(--text-2); }
+  .chips { display:flex; gap:4px; } .chip { padding:7px 11px; border-radius:999px; font-size:12px; font-weight:700; background:var(--paper); color:var(--ink); }
+  .chip.on { background:transparent; color:var(--text); box-shadow:inset 0 0 0 1.5px var(--text); }
+
+  .flow { display:flex; gap:26px; align-items:flex-start; flex-wrap:wrap; }
+  .pho { overflow:visible; width:228px; height:506px; border-radius:var(--R); background:var(--screen); position:relative; overflow:hidden; margin:13px;
+         box-shadow:0 0 0 10px oklch(0.10 0.003 60), 0 0 0 11.5px oklch(0.34 0.003 60); }
+  .pho::before { content:""; position:absolute; top:11px; left:50%; width:13px; height:13px; margin-left:-6.5px; border-radius:50%; background:oklch(0.04 0.003 60); z-index:9; }
+  .pho .card { position:absolute; left:var(--m); right:var(--m); }
+  .dk { position:absolute; left:var(--m); right:var(--m); bottom:var(--m); background:var(--surface); border-radius:var(--card-r); padding:6px; display:grid; grid-template-columns:1fr 46px; gap:6px; }
+  .dk .fld { background:oklch(0.22 0.004 60); border-radius:var(--btn-r); padding:8px 10px; font-size:13px; line-height:1.3; color:var(--text-2); display:flex; flex-direction:column; align-items:flex-start; gap:5px; min-height:46px; }
+  .dk .tag { background:var(--paper); color:var(--ink); font-size:11px; font-weight:700; border-radius:var(--btn-r); padding:3px 6px; white-space:nowrap; }
+  .dk .tag i { font-style:normal; opacity:.5; margin-left:4px; }
+  .dk .mic2 { border-radius:var(--btn-r); background:var(--paper); display:grid; place-items:center; }
+  .dk .mic2 span { width:12px; height:16px; border-radius:4px 4px 7px 7px; border:2.5px solid var(--ink); }
+  .typed { color:var(--text); }
+  .fcap { width:254px; font-size:13px; color:oklch(0.36 0.004 60); line-height:1.4; margin-top:8px; } .fcap b { color:var(--ink); }
+  .arrowbig { align-self:center; font-size:28px; color:oklch(0.5 0.004 60); }
+
+  .key { position:absolute; right:-13px; width:4px; border-radius:2px; background:oklch(0.45 0.003 60); }
+  .keyon { background:var(--o); }
+  .listen { position:absolute; left:var(--m); right:var(--m); background:var(--surface); border-radius:var(--card-r); padding:12px; color:var(--text); }
+  .wv { display:flex; gap:3px; align-items:center; height:18px; margin-top:10px; } .wv i { width:3px; border-radius:2px; background:var(--o); }
+  .hint { position:absolute; left:0; right:0; bottom:10px; text-align:center; font-size:10.5px; color:oklch(0.5 0.004 60); }
+  .kb2 { position:absolute; left:0; right:0; bottom:0; height:172px; background:oklch(0.22 0.004 60); padding:9px 5px; display:flex; flex-direction:column; gap:6px; }
+  .kb2 div { display:flex; gap:4px; justify-content:center; } .kb2 i { width:18px; height:30px; border-radius:4px; background:oklch(0.36 0.004 60); }
+  .field2 { position:absolute; left:var(--m); right:var(--m); background:var(--surface); border-radius:var(--card-r); padding:6px; display:grid; grid-template-columns:1fr 40px; gap:6px; }
+  .field2 .in { background:oklch(0.20 0.004 60); border-radius:var(--btn-r); padding:8px 10px; font-size:13px; color:var(--text); display:flex; flex-direction:column; gap:5px; align-items:flex-start; }
+  .field2 .go2 { background:var(--o); border-radius:var(--btn-r); display:grid; place-items:center; font-weight:800; color:var(--ink); }
+  .tag2 { background:var(--paper); color:var(--ink); font-size:11px; font-weight:700; border-radius:var(--btn-r); padding:3px 6px; }
+  .pull { position:absolute; top:34px; left:50%; transform:translateX(-50%); font-size:16px; color:oklch(0.55 0.004 60); }
+
+  /* 3a body: its own shape, corner ~9% of body width (measured), not screen R + bezel */
+  .phone, .pho { box-shadow:none !important; overflow:visible !important; isolation:isolate; }
+  .phone::after, .pho::after { content:""; position:absolute; inset:-10px; border-radius:22px; background:oklch(0.10 0.003 60);
+     box-shadow:0 0 0 1.5px oklch(0.34 0.003 60), 0 18px 40px 6px oklch(0.2 0.01 60 / .22); z-index:-1; }
+
+  .car { position:absolute; left:0; right:0; overflow:hidden; }
+  .car .track { display:flex; gap:6px; padding-left:var(--m); }
+  .car .card { position:relative !important; left:auto !important; right:auto !important; flex:none; width:188px; }
+  .car .hero { height:150px; border-radius:var(--btn-r); overflow:hidden; } .car .hero img { width:100%; height:100%; object-fit:cover; display:block; }
+  .dots { display:flex; gap:4px; justify-content:center; margin-top:8px; } .dots i { width:5px; height:5px; border-radius:50%; background:oklch(0.4 0.004 60); } .dots i.on { background:var(--text); width:14px; border-radius:3px; }
+  .count { font-size:11px; color:var(--text-2); }
+  .strip { display:flex; gap:4px; overflow:hidden; margin:0 calc(-1 * var(--p)); padding:0 var(--p); }
+  .strip .media { flex:none; width:96px; height:120px; border-radius:var(--btn-r); position:relative; overflow:hidden; }
+  .strip .media img { width:100%; height:100%; object-fit:cover; display:block; }
+  .strip .nm { position:absolute; left:5px; bottom:5px; font-size:11px; font-weight:700; color:var(--ink); background:var(--paper); padding:2px 6px; border-radius:3px; }
+  .sstrip { display:flex; gap:4px; overflow:hidden; margin-right:calc(-1 * var(--p)); }
+  .sstrip .btn { flex:none; width:58px; flex-direction:column; justify-content:center; align-items:center; gap:2px; padding:10px 0; }
+  .sstrip .btn small { display:block; font-size:10px; font-weight:600; color:oklch(0.45 0.004 60); }
+
+  /* button hierarchy: solid orange = commits, orange outline = picks/moves forward, grey outline = everything else */
+  .btn.pick { background:transparent; color:#fe843d; box-shadow:inset 0 0 0 1.5px #fe843d; }
+  .btn.pick.fill { background:oklch(0.66 0.21 40 / .14); box-shadow:none; }
+  .btn.pick small { color:oklch(0.66 0.21 40 / .75) !important; }
+  .legend3 { display:flex; gap:10px; margin:0 0 18px; flex-wrap:wrap; }
+  .legend3 div { background:oklch(0.255 0.004 60); border-radius:11px; padding:6px; display:flex; align-items:center; gap:10px; padding-right:14px; color:var(--text); font-size:13px; }
+  .legend3 .btn { flex:none; padding:10px 14px; }
+  /* trail: what the agent looked at or did, one plain line per app. Read-only, so text on the card, never tiles. */
+  .trail { display:flex; flex-direction:column; gap:7px; margin-top:10px; }
+  .step { display:grid; grid-template-columns:14px 1fr; gap:6px; align-items:baseline; font-size:13px; line-height:1.3; }
+  .step b { font-size:11.5px; font-weight:600; color:var(--text-2); margin-right:5px; }
+  .step .s { font-size:11px; color:var(--text-2); text-align:center; }
+  .step.done .s { color:var(--text); }
+  .step.now { color:var(--text-2); }
+  .step.now .s::before { content:""; display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--o); }
+  .todo { display:flex; flex-direction:column; gap:6px; margin-top:12px; font-size:14px; }
+  .todo > div { display:flex; flex-direction:column; gap:1px; min-width:0; }
+  .todo b { display:block; font-size:11.5px; font-weight:600; color:var(--text-2); }
+  .quote { font-size:15px; line-height:1.35; }
+  .more { font-size:11.5px; color:var(--text-2); margin-top:8px; }
+  .home-top { position:absolute; top:34px; left:14px; right:14px; color:var(--text); }
+  .home-top .t { font-size:30px; font-weight:800; letter-spacing:-.04em; }
+  .home-top .d { font-size:12px; color:var(--text-2); }
+  /* Landing-page screen: 584 x 706 (10 px/mm), shown at half size. Cards sit at the bottom. */
+  .pho { width:292px !important; height:353px !important; border-radius:32.5px !important; --R:32.5px; --card-r:26.5px; --btn-r:20.5px; }
+  .pho::before { display:none; }
+  .pho .key { display:none; }
+  .pho .card, .pho .listen { top:auto !important; bottom:var(--m); }
+  .home-top { top:22px; }
+
+  /* app badges: the app's own colour + glyph, so each trail line says which app at a glance */
+  .ap { width:18px; height:18px; border-radius:5px; display:inline-grid; place-items:center; font-size:10px; font-weight:800; flex:none; }
+  .ap.wa { background:#25d366; color:#fff; } .ap.cal { background:#fff; color:#e5483c; font-size:9px; } .ap.nam { background:#f6e7d8; color:#3a2a20; font-size:10px; } .ap.ub { background:#000; color:#fff; box-shadow:inset 0 0 0 1px #444; }
+  .tr { display:flex; flex-direction:column; gap:8px; margin-top:10px; }
+  .tl { display:flex; gap:8px; align-items:center; font-size:13px; line-height:1.25; }
+  .tl .ok { margin-left:auto; font-size:12px; color:var(--text); }
+  .tl.now { color:var(--text-2); } .tl.now .ok { width:6px; height:6px; border-radius:50%; background:var(--o); }
+  .tl.look { color:var(--text-2); } .tl.look b { color:var(--text); font-weight:500; }
+  .hdr { display:grid; grid-template-columns:52px 1fr; gap:10px; align-items:center; }
+  .th { width:52px; height:52px; border-radius:var(--btn-r); overflow:hidden; } .th img { width:100%; height:100%; object-fit:cover; display:block; }
+  .hero { height:96px; border-radius:var(--btn-r); overflow:hidden; position:relative; } .hero img { width:100%; height:100%; object-fit:cover; display:block; }
+  .hero .nm { position:absolute; left:6px; bottom:6px; font-size:11px; font-weight:700; color:var(--ink); background:var(--paper); padding:2px 6px; border-radius:4px; }
+  .big { font-size:30px; font-weight:800; letter-spacing:-.045em; line-height:1; }
+  .big .tick { width:24px; height:24px; font-size:13px; vertical-align:4px; }
+  .q { font-size:15px; line-height:1.35; margin-top:6px; }
+  .do { display:flex; flex-direction:column; gap:7px; margin-top:12px; }
+  .do .tl { align-items:flex-start; } .do .tl .ap { margin-top:1px; }
+  .av { display:flex; flex-direction:column; gap:6px; margin-top:10px; }
+  .av div { display:flex; align-items:center; gap:8px; font-size:13.5px; font-weight:600; }
+  .av i { width:22px; height:22px; border-radius:50%; display:grid; place-items:center; font-style:normal; font-size:10px; font-weight:800; color:var(--ink); }
+  .av span { margin-left:auto; font-size:12px; font-weight:500; color:var(--text-2); } .av span.y { color:var(--text); }
+  .clock { position:absolute; top:26px; left:16px; color:var(--text); }
+  .clock .t { font-size:46px; font-weight:300; letter-spacing:-.04em; line-height:1; } .clock .d { font-size:12px; color:var(--text-2); margin-top:4px; }
+  .said { position:absolute; left:16px; right:16px; top:40px; color:var(--text); font-size:21px; font-weight:300; line-height:1.3; letter-spacing:-.01em; }
+  .said em { font-style:normal; color:var(--text-2); }
+  .lst { position:absolute; left:16px; bottom:18px; display:flex; gap:10px; align-items:center; font-size:12px; color:var(--text-2); }
+</style></head><body>
+<h1>Card + trail: the dinner run (landing-page screen, 584×706)</h1>
+<p class="sub">One card that changes in place. Trail lines carry the app's icon; ✓ only ever means done. Nothing books or sends until the one orange tap, on a card that lists everything it will do.</p>
+<div class="flow"><div><div class="pho"><div class="said">Book bibimbap at Namsan on Friday with FriendC, FriendB and ColleagueA<em>, and let them know.</em></div><div class="lst"><div class="wv" style="margin:0"><i style="height:6px"></i><i style="height:12px"></i><i style="height:18px"></i><i style="height:9px"></i><i style="height:15px"></i><i style="height:7px"></i><i style="height:13px"></i></div>Listening</div></div><div class="fcap"><b>1. Hold the key, say it.</b> Your words, big, as you say them.</div></div>
+<div><div class="pho"><div class="card"><div class="hero"><img src="https://images.unsplash.com/photo-1498654896293-37aacf113fd9?w=500&q=70"><span class="nm">Namsan · Korean</span></div><div class="c" style="padding-bottom:8px"><div class="src">Misura</div><div class="who">Dinner Friday</div><div class="tr"><div class="tl look"><span class="ap nam">남</span><span><b>Table for 4</b> free at 19:30</span></div><div class="tl look"><span class="ap cal">14</span><span><b>Friday evening</b> is free</span></div><div class="tl now"><span class="ap wa">✆</span><span>Writing to FriendC, FriendB, ColleagueA</span><span class="ok"></span></div></div></div></div></div><div class="fcap"><b>2. It checks, out loud.</b> Each line is an app it looked at. Nothing booked or sent, nothing to tap.</div></div>
+<div><div class="pho"><div class="card"><div class="c"><div class="hdr"><div class="th"><img src="https://images.unsplash.com/photo-1498654896293-37aacf113fd9?w=500&q=70"></div><div><div class="src">Namsan · Fri</div><div class="big">19:30</div></div></div><div class="do"><div class="tl"><span class="ap nam">남</span><span>Book for 4</span></div><div class="tl"><span class="ap cal">14</span><span>Add to calendar</span></div><div class="tl"><span class="ap wa">✆</span><span><span class="src">FriendC, FriendB, ColleagueA</span><div class="q">“Booked Namsan for Friday 19:30, bibimbap on me 🍜”</div></span></div></div></div><div class="acts"><div class="btn go">Book &amp; send <span>→</span></div><div class="btn ghost">Edit</div></div></div></div><div class="fcap"><b>3. One tap does it all.</b> Every action and the exact message. Say “make it 20:00” and it updates; only orange commits.</div></div>
+<div><div class="pho"><div class="card"><div class="c"><div class="hdr"><div class="th"><img src="https://images.unsplash.com/photo-1498654896293-37aacf113fd9?w=500&q=70"></div><div><div class="src">Namsan · Fri 19:30</div><div class="big"><span class="tick">✓</span>Booked</div></div></div><div class="tr"><div class="tl"><span class="ap cal">14</span><span>In your calendar</span><span class="ok">✓</span></div><div class="tl"><span class="ap wa">✆</span><span>Sent · seen by FriendB</span><span class="ok">✓</span></div></div></div><div class="acts"><div class="btn pick" style="flex:1.6"><span class="ap ub">U</span>&nbsp;Uber at 19:05 <span>→</span></div><div class="btn ghost">Not now</div></div></div></div><div class="fcap"><b>4. The trail becomes the receipt.</b> Proof per app. The ride is its own tap.</div></div>
+<div><div class="pho"><div class="clock"><div class="t">16:42</div><div class="d">Wednesday</div></div><div class="card"><div class="c" style="padding-bottom:8px"><div class="hdr"><div class="th"><img src="https://images.unsplash.com/photo-1498654896293-37aacf113fd9?w=500&q=70"></div><div><div class="src">Friday · Namsan</div><div class="big">19:30</div></div></div><div class="av"><div><i style="background:#9fc3ff">J</i>FriendB<span class="y">coming</span></div><div><i style="background:#ffc9a3">M</i>FriendC<span class="y">coming</span></div><div><i style="background:#c9e6b5">S</i>ColleagueA<span>no reply yet</span></div></div></div></div></div><div class="fcap"><b>5. Later, on home.</b> What's still open: who's coming.</div></div></div>
+</body></html>

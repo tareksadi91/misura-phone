@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --screen:#080706; --surface:#32302e; --sunk:#1c1a19; --text:#efeeec; --text-2:#adaaa8; --paper:#efeeec; --ink:#110f0e;
+    --o:#f65400; --o-text:#fe843d; --outline:#82807e; --page:oklch(0.92 0.004 90);
+    --R:17px; --m:6px; --p:6px; --card-r:calc(var(--R) - var(--m)); --btn-r:5px;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--page); font-family:"Hanken Grotesk",system-ui,sans-serif; color:var(--ink); padding:32px; }
+  h1 { font-weight:800; font-size:28px; margin:0 0 6px; letter-spacing:-.02em; }
+  h2 { font-weight:700; font-size:19px; margin:42px 0 6px; }
+  .sub { color:oklch(0.42 0.004 60); margin:0 0 18px; font-size:15px; max-width:92ch; line-height:1.45; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:12px; }
+  .sw { border-radius:var(--card-r); overflow:hidden; background:#fff; }
+  .sw .c { height:74px; } .sw .t { padding:10px 12px; font-size:12.5px; line-height:1.45; } .sw b { font-size:13.5px; }
+  .sw code { font-size:11.5px; color:#555; }
+  .stage { background:var(--screen); border-radius:var(--R); padding:16px; color:var(--text); }
+  .row { display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
+  table { border-collapse:collapse; width:100%; max-width:1000px; font-size:14px; }
+  td, th { text-align:left; padding:10px 12px; border-bottom:1px solid oklch(0.85 0.004 90); vertical-align:middle; }
+  th { font-size:12px; color:#666; font-weight:600; }
+  .card { background:var(--surface); color:var(--text); border-radius:var(--card-r); padding:var(--p); display:flex; flex-direction:column; gap:var(--p); }
+  .btn { border-radius:var(--btn-r); padding:13px 14px; font-size:14px; font-weight:700; display:inline-flex; justify-content:space-between; align-items:center; gap:10px; min-width:120px; min-height:48px; white-space:nowrap; }
+  .commit { background:var(--o); color:var(--ink); }
+  .fwd { color:var(--o-text); box-shadow:inset 0 0 0 1.5px var(--o-text); }
+  .sec { color:var(--text); box-shadow:inset 0 0 0 1.5px var(--outline); justify-content:center; }
+  .opt { background:var(--paper); color:var(--ink); justify-content:center; }
+  .pressed { transform:scale(.97); filter:brightness(.94); }
+  .disabled { opacity:.4; }
+  .focus { outline:2px solid var(--text); outline-offset:2px; }
+  .sel { box-shadow:inset 0 0 0 2px var(--o); }
+  .meter { display:flex; gap:3px; } .meter i { width:10px; height:8px; border-radius:2px; background:#5b5957; } .meter i.on { background:var(--ink); }
+  .stage .meter i.on { background:var(--text); }
+  .lbl { font-size:12px; color:#666; margin-top:6px; text-align:center; }
+  .stage .lbl { color:var(--text-2); }
+  .typ div { display:grid; grid-template-columns:120px 1fr 200px; align-items:baseline; gap:16px; padding:12px 0; border-bottom:1px solid oklch(0.85 0.004 90); }
+  .typ code { font-size:12px; color:#555; }
+  .chip { padding:8px 13px; border-radius:999px; font-size:12px; font-weight:700; background:var(--paper); color:var(--ink); }
+  .chip.on { background:transparent; color:var(--text); box-shadow:inset 0 0 0 1.5px var(--text); }
+  .tag { background:var(--paper); color:var(--ink); font-size:11px; font-weight:700; border-radius:3px; padding:3px 6px; }
+  .pin { width:18px; height:18px; border-radius:50%; background:var(--paper); color:var(--ink); font-size:10px; font-weight:800; display:inline-grid; place-items:center; }
+  .dots { display:flex; gap:4px; align-items:center; } .dots i { width:5px; height:5px; border-radius:50%; background:#5b5957; } .dots i.on { width:14px; border-radius:3px; background:var(--text); }
+  .scrub { width:170px; } .scrub .tr { height:4px; border-radius:2px; background:#706e6c; position:relative; } .scrub .tr i { position:absolute; left:0; top:0; bottom:0; width:40%; background:var(--text); border-radius:2px; }
+  .scrub .tr b { position:absolute; left:40%; top:50%; width:12px; height:12px; margin:-6px 0 0 -6px; border-radius:50%; background:var(--text); }
+  .spacing { display:flex; gap:26px; align-items:flex-end; flex-wrap:wrap; }
+  .box { background:var(--screen); border-radius:var(--R); width:200px; height:150px; position:relative; }
+  .box .card { position:absolute; left:var(--m); right:var(--m); bottom:var(--m); }
+  .rules li { margin:6px 0; font-size:14.5px; line-height:1.45; }
+  .ok { color:#1b7a3a; font-weight:700; } .warn { color:#a35a00; font-weight:700; }
+</style></head><body>
+
+<h1>Misura component guide</h1>
+<p class="sub">Every element the cards are built from, with tokens, states and when to use it. Source of truth in text: <code>docs/design/card-system.md</code>. Cards themselves: the card system page.</p>
+
+<h2>Color</h2>
+<p class="sub">Dark only for Demo 1. No gradients, no glow, no decorative lines. Contrast measured (WCAG).</p>
+<div class="grid">
+  <div class="sw"><div class="c" style="background:var(--screen)"></div><div class="t"><b>screen</b><br><code>#080706</code><br>Behind cards</div></div>
+  <div class="sw"><div class="c" style="background:var(--surface)"></div><div class="t"><b>surface</b><br><code>#32302e</code><br>Card</div></div>
+  <div class="sw"><div class="c" style="background:var(--sunk)"></div><div class="t"><b>surface-sunk</b><br><code>#1c1a19</code><br>Map base, input field</div></div>
+  <div class="sw"><div class="c" style="background:var(--text)"></div><div class="t"><b>text / paper</b><br><code>#efeeec</code><br>Text 11.4 : 1 on surface. Option tiles</div></div>
+  <div class="sw"><div class="c" style="background:var(--text-2)"></div><div class="t"><b>text-2</b><br><code>#adaaa8</code><br>Labels, meta. 5.7 : 1</div></div>
+  <div class="sw"><div class="c" style="background:var(--ink)"></div><div class="t"><b>ink</b><br><code>#110f0e</code><br>Text on paper (16.5) and orange (5.6)</div></div>
+  <div class="sw"><div class="c" style="background:var(--o)"></div><div class="t"><b>orange</b><br><code>#f65400</code><br>Commit button, selected, listening</div></div>
+  <div class="sw"><div class="c" style="background:var(--o-text)"></div><div class="t"><b>orange-text</b><br><code>#fe843d</code><br>Forward button label + edge. 5.4 : 1</div></div>
+  <div class="sw"><div class="c" style="background:var(--outline)"></div><div class="t"><b>outline</b><br><code>#82807e</code><br>Secondary edge. 3.3 : 1</div></div>
+</div>
+
+<h2>Type</h2>
+<p class="sub">Hanken Grotesk, bundled. Follows the system font scale; cards grow rather than truncate the message.</p>
+<div class="stage typ">
+  <div><code>word 32/800</code><span style="font-size:32px;font-weight:800;letter-spacing:-.05em;line-height:1">Closed</span><span class="lbl" style="text-align:left">Hero word or number</span></div>
+  <div><code>title 16/700</code><span style="font-size:16px;font-weight:700">ColleagueB K.</span><span class="lbl" style="text-align:left">Person, place, subject</span></div>
+  <div><code>body 14/500</code><span style="font-size:14px;font-weight:500;line-height:1.38">Could we meet next week about the rebrand?</span><span class="lbl" style="text-align:left">Messages, drafts</span></div>
+  <div><code>button 14/700</code><span style="font-size:14px;font-weight:700">Suggest times</span><span class="lbl" style="text-align:left">Verbs only</span></div>
+  <div><code>meta 13/500</code><span style="font-size:13px;color:var(--text-2)">Open Saturday from 19:00</span><span class="lbl" style="text-align:left">Detail lines</span></div>
+  <div style="border:0"><code>source 11.5/600</code><span style="font-size:11.5px;font-weight:600;color:var(--text-2)">Email</span><span class="lbl" style="text-align:left">App or source</span></div>
+</div>
+
+<h2>Space and corners</h2>
+<p class="sub">Concentric: card corner = screen corner − margin; tile corner = card corner − padding (min 4). Screen corner is read from Android at runtime. One radius per level.</p>
+<div class="spacing">
+  <div><div class="box"><div class="card"><div style="padding:6px;font-size:13px;font-weight:700">Card</div><div class="btn opt" style="min-height:36px;padding:8px">Tile</div></div></div><div class="lbl">screen 17 · margin 6 · card 11 · padding 6 · tile 5 · gap 4</div></div>
+</div>
+
+<h2>Buttons</h2>
+<p class="sub">Four kinds, one meaning each. At most one Commit per card and per screen. Minimum touch target 48 × 48 dp.</p>
+<table>
+  <tr><th>Kind</th><th>Looks like</th><th>Means</th><th>Examples</th></tr>
+  <tr><td><b>Commit</b></td><td><div class="stage" style="display:inline-block;padding:10px"><span class="btn commit">Send <span>→</span></span></div></td><td>Sends, books, creates. The only kind that commits.</td><td>Send, Add to calendar, Send both</td></tr>
+  <tr><td><b>Forward</b></td><td><div class="stage" style="display:inline-block;padding:10px"><span class="btn fwd">Choose <span>→</span></span></div></td><td>Moves forward. Nothing is sent.</td><td>Choose, Suggest times, Check again</td></tr>
+  <tr><td><b>Secondary</b></td><td><div class="stage" style="display:inline-block;padding:10px"><span class="btn sec">Edit</span></div></td><td>Anything else.</td><td>Edit, Reply, Map, Open chat</td></tr>
+  <tr><td><b>Option</b></td><td><div class="stage" style="display:inline-block;padding:10px"><span class="btn opt">14:30</span></div></td><td>One of several things to pick.</td><td>Rows, slots, photos, player controls</td></tr>
+</table>
+
+<h2>States</h2>
+<p class="sub">Every tappable element has these. Shown on Commit and Option.</p>
+<div class="stage"><div class="row">
+  <div><span class="btn commit">Send <span>→</span></span><div class="lbl">default</div></div>
+  <div><span class="btn commit pressed">Send <span>→</span></span><div class="lbl">pressed · 0.97, −6% L</div></div>
+  <div><span class="btn commit" style="justify-content:center"><span class="meter"><i class="on"></i><i class="on"></i><i></i></span></span><div class="lbl">working · not tappable</div></div>
+  <div><span class="btn commit disabled">Send <span>→</span></span><div class="lbl">disabled · card says why</div></div>
+  <div><span class="btn commit focus">Send <span>→</span></span><div class="lbl">focused · 2 px ring</div></div>
+</div><div class="row" style="margin-top:16px">
+  <div><span class="btn opt">14:30</span><div class="lbl">option default</div></div>
+  <div><span class="btn opt sel">14:30</span><div class="lbl">selected · 2 px orange edge</div></div>
+  <div><span class="btn opt disabled">14:30</span><div class="lbl">unavailable</div></div>
+</div></div>
+
+<h2>Other elements</h2>
+<div class="stage"><div class="row" style="gap:28px">
+  <div><span class="meter"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></span><div class="lbl">meter · discrete blocks</div></div>
+  <div class="scrub"><div class="tr"><i></i><b></b></div><div class="lbl">scrubber</div></div>
+  <div><span class="chip on">dinner</span> <span class="chip">&lt;10 min</span><div class="lbl">filter chips · selected / not</div></div>
+  <div><span class="tag">ColleagueB K. ✕</span><div class="lbl">name tag · reply target</div></div>
+  <div><span class="pin">1</span> <span class="pin" style="background:var(--o)">2</span><div class="lbl">pins · selected orange</div></div>
+  <div><span class="dots"><i class="on"></i><i></i><i></i><i></i></span><div class="lbl">carousel dots</div></div>
+</div></div>
+
+<h2>Motion</h2>
+<ul class="rules">
+  <li>150–250 ms, ease-out (quint). Only for state changes and card swaps.</li>
+  <li>Card swap: content cross-fades in place, height animates. Expand and shrink follow the finger.</li>
+  <li>No decorative motion. The particle sun is the only ambient movement.</li>
+</ul>
+
+<h2>Copy</h2>
+<ul class="rules">
+  <li>Buttons are verbs: "Suggest times", "Send", "Check again".</li>
+  <li>No filler states: not "Answer ready", "Your turn", "Success".</li>
+  <li>Header = source + person or place. Hero = the one thing to read.</li>
+  <li>A card that commits always shows the exact content it will send.</li>
+</ul>
+</body></html>

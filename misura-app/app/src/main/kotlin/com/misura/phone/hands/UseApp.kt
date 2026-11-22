@@ -501,7 +501,7 @@ class UseApp(
                 val screenMs = ms(t0); val nodes = look.root.count { true }
                 val words = synchronized(lock) { heard.toList() }
                 if (words.size > told) { told = words.size; note("$app: got it, adjusting") }
-                val user = "Goal: $goal\n" + thingBlock(thing) + (if (count == null) "" else "Record $count thing${if (count == 1) "" else "s"}, then you are done.\n") + (if (words.isEmpty()) "" else "The user added while you worked (newest last):\n${words.joinToString("\n") { "- $it" }}\n") + "Done so far:\n${did.joinToString("\n").ifEmpty { "(nothing yet)" }}\n" + (if (things.isEmpty() && (modelRounds + 1) in NUDGE_ROUNDS) "$NUDGE\n" else "") + "Screen:\n${seen.joinToString("\n") { it.line }}"
+                val user = handPrompt(goal, thing, count, words, did, things.isEmpty() && (modelRounds + 1) in NUDGE_ROUNDS, seen)
                 if (late()) return gaveUp("took too long")
                 val t1 = System.nanoTime()
                 val turns = listOf(Turn("user", buildJsonObject { put("role", "user"); put("parts", buildJsonArray { add(buildJsonObject { put("text", user) }) }) }))
@@ -607,16 +607,7 @@ class UseApp(
                     }
                 }
                 // What the step line says right now, in plain words; nothing for done/fail (the step closes).
-                when (c.name) {
-                    "tap" -> el()?.let { "tap “${it.words.take(30).ifEmpty { "a button" }}”" }
-                    "type" -> "type “${c.args.str("text").orEmpty().take(30)}”"
-                    "key" -> c.args.str("name")
-                    "scroll" -> "scroll ${c.args.str("direction") ?: "down"}"
-                    "wait" -> "waiting for the screen"
-                    "note" -> "noting what it found"
-                    "item" -> "saving ${c.args.str("title").orEmpty().take(30)}"
-                    else -> null
-                }?.let { note("$app: $it") }
+                stepLine(c, el())?.let { note("$app: $it") }
                 // Last look before a queued step touches anything: new words from the user win over the plan (Codex audit P1).
                 if (batched && synchronized(lock) { heard.size } > plannedWith) { did += "${did.size + 1}. step $stepNo of $stepsTotal not run: the user said something new"; queue.clear(); return@repeat } // step 1 too (Codex review P1)
                 val note: String = when (c.name) {
@@ -653,10 +644,8 @@ class UseApp(
                         if (HiddenInput.tap(s, x, y)) "tapped ${e.line}" else "tap on ${e.line} did not go through" } ?: "no such element"
                     "type" -> el()?.let { e ->
                         val text = c.args.str("text").orEmpty()
-                        // A queued type writes by position: re-check right before that the same field is still there (and, without a label,
-                        // still the focused search box), so a field that took its place gets nothing (Codex review).
-                        if (queued != null && screen(s, tries = 5)?.root?.let { r -> flatten(r, W, H, max = Int.MAX_VALUE) }?.any { it.bounds.contentEquals(e.bounds) && it.words == e.words && it.editable && (c.args[FOCUSED_SEARCH] == null || (it.focused && it.search)) } != true)
-                            return@let "the field changed before typing; look again"
+                        if (queued != null) typeCheck(s, e, c.args[FOCUSED_SEARCH] != null, ::late) { synchronized(lock) { heard.size } > plannedWith }?.let { why ->
+                            if (why == LATE) return gaveUp("took too long"); queue.clear(); return@let why }
                         when { !e.editable -> "${e.line} is not a field"; HiddenInput.setTextAt(s, e.bounds, text) -> "typed \"$text\" into ${e.line}"; else -> "typing into ${e.line} failed" }
                     } ?: "no such element"
                     "key" -> when (c.args.str("name")) {
@@ -714,9 +703,14 @@ class UseApp(
             }
             return gaveUp("didn't finish in $maxActions steps")
         } finally {
-            synchronized(lock) { if (added === heard) added = null }
-            withContext(NonCancellable) { keep?.let { park(it) } ?: runCatching { hidden.close(s) } }
+            endRun(heard, keep, s)
         }
+    }
+
+    /** How every run ends (one call: a finally is copied into each of work()'s many exits, and work() sits at the JVM method-size limit). */
+    private suspend fun endRun(heard: MutableList<String>, keep: Parked?, s: DisplaySession) {
+        synchronized(lock) { if (added === heard) added = null }
+        withContext(NonCancellable) { keep?.let { park(it) } ?: runCatching { hidden.close(s) } }
     }
 
     /** The app's screen, waiting up to 10 s for a window to exist. */
@@ -760,6 +754,35 @@ class UseApp(
             delay(STEP_POLL_MS)
             look = screen(s, tries = 1) ?: return look to UNREADABLE
         }
+    }
+
+    /** What the step line says for [c] right now, in plain words ([e] = its element); null for done/fail (the step closes). */
+    private fun stepLine(c: ToolCall, e: Seen?): String? = when (c.name) {
+        "tap" -> e?.let { "tap “${it.words.take(30).ifEmpty { "a button" }}”" }
+        "type" -> "type “${c.args.str("text").orEmpty().take(30)}”"
+        "key" -> c.args.str("name")
+        "scroll" -> "scroll ${c.args.str("direction") ?: "down"}"
+        "wait" -> "waiting for the screen"
+        "note" -> "noting what it found"
+        "item" -> "saving ${c.args.str("title").orEmpty().take(30)}"
+        else -> null
+    }
+
+    /** One round's text for the hand's model: the goal, the thing to open, the count, the user's words, what was done, the nudge and the screen. */
+    private fun handPrompt(goal: String, thing: Pair<String, String?>?, count: Int?, words: List<String>, did: List<String>, nudge: Boolean, seen: List<Seen>) =
+        "Goal: $goal\n" + thingBlock(thing) + (if (count == null) "" else "Record $count thing${if (count == 1) "" else "s"}, then you are done.\n") + (if (words.isEmpty()) "" else "The user added while you worked (newest last):\n${words.joinToString("\n") { "- $it" }}\n") + "Done so far:\n${did.joinToString("\n").ifEmpty { "(nothing yet)" }}\n" + (if (nudge) "$NUDGE\n" else "") + "Screen:\n${seen.joinToString("\n") { it.line }}"
+
+    /**
+     * Right before a queued type writes (by position): the same field must still be there, and without a label still the focused search box,
+     * so a field that took its place gets nothing (Codex review). That read takes time, so the budget ([late]) and new words ([heardNew]) are
+     * checked again after it (Codex re-check). Null = go ahead; [LATE] = out of time; else why not.
+     */
+    private suspend fun typeCheck(s: DisplaySession, e: Seen, focusedSearch: Boolean, late: () -> Boolean, heardNew: () -> Boolean): String? {
+        val now = screen(s, tries = 5)?.root?.let { r -> flatten(r, W, H, max = Int.MAX_VALUE) }
+        if (now?.any { it.bounds.contentEquals(e.bounds) && it.words == e.words && it.editable && (!focusedSearch || (it.focused && it.search)) } != true) return "the field changed before typing; look again"
+        if (late()) return LATE
+        if (heardNew()) return "not typed: the user said something new"
+        return null
     }
 
     /** A steps call checked: its first action as a call on [seen] (the screen the model saw) plus the rest, or why it can't run. */
@@ -818,6 +841,7 @@ class UseApp(
         private val STEP_OK = listOf("tapped ", "typed ", "pressed ", "waited")
         private const val AMBIGUOUS = "more than one element shows"
         private const val UNREADABLE = "the screen could not be read"
+        private const val LATE = "took too long"
         /** Internal mark on a queued type with no label: it may only go into the focused search box. */
         private const val FOCUSED_SEARCH = "_focused_search"
         // Live: a find ask spent 25 actions in filter and sort screens and recorded nothing. Twice, while nothing is recorded, the model is told to record first.

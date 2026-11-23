@@ -201,13 +201,23 @@ fun NavLine(back: String?, here: String, stepCount: Int, onBack: () -> Unit, onS
             modifier = Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = "Back", onClick = onBack).padding(end = 12.u).wrapCenter())
         // Root: what you asked takes the free width; ellipsis only if it really doesn't fit.
         else Text(here, style = ST.nav, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).heightIn(min = 48.dp).wrapCenter())
-        // With "‹ …" on the left, your words take what's left and end in "…"; the step count always stays whole.
+        // With "‹ …" on the left, your words take what's left and end in "…"; the step count is measured first and stays whole.
         val words = here.takeIf { back != null && it.isNotEmpty() }
         val count = if (stepCount > 0) "$stepCount ${if (stepCount == 1) "step" else "steps"} ›" else null
-        if (words != null || count != null) Row((if (back != null) Modifier.weight(1f, fill = false) else Modifier).heightIn(min = 48.dp)
-            .clickable(enabled = stepCount > 0, role = Role.Button, onClickLabel = "History", onClick = onSteps).padding(start = 12.u).wrapCenter()) {
+        if (words != null || count != null) Row((if (back != null) Modifier.weight(1f) else Modifier).heightIn(min = 48.dp)
+            .clickable(enabled = stepCount > 0, role = Role.Button, onClickLabel = "History", onClick = onSteps).padding(start = 12.u).wrapCenter(),
+            horizontalArrangement = Arrangement.End) {
             if (words != null) Text(words, style = ST.nav, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-            if (count != null) Text(if (words != null) " · $count" else count, style = ST.nav, maxLines = 1)
+            if (count != null) {
+                // Large text on a narrow phone: "‹ Home" and "12 steps ›" can't share one line, so the count drops the word.
+                val full = if (words != null) " · $count" else count
+                val measure = androidx.compose.ui.text.rememberTextMeasurer()
+                androidx.compose.foundation.layout.BoxWithConstraints {
+                    val fits = measure.measure(full, ST.nav, maxLines = 1).size.width <= constraints.maxWidth
+                    Text(if (fits) full else "$stepCount ›", style = ST.nav, maxLines = 1,
+                        modifier = Modifier.semantics { contentDescription = "$stepCount ${if (stepCount == 1) "step" else "steps"}" })
+                }
+            }
         }
     }
 }

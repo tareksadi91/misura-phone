@@ -369,7 +369,7 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
                 // At the root, your words already show as the echo while Misura works or asks: the nav line doesn't repeat them.
                 val echoed = thinking || (say is Say.Approve && !finished) || (places.isEmpty() && items.isEmpty() && say !is Say.Approve)
                 NavLine(backLabel(o.s, o.facts, nav), when (val t = nav.top) { is Screen.Detail -> o.facts[t.placeId]?.label ?: ""; Screen.FullMap -> "Map"; Screen.History -> "Steps"; Screen.Root -> if (echoed) "" else o.asked },
-                    o.steps.size, onBack = { nav = nav.back() ?: run { goHome(); nav } }, onSteps = openHistory,
+                    o.steps.size, onBack = { nav = nav.back() ?: run { keyboard?.hide(); focus.clearFocus(); goHome(); nav } }, onSteps = openHistory,
                     Modifier.padding(horizontal = M.gutter - M.m))
                 Box(Modifier.weight(1f).fillMaxWidth().pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false); pressed = true; waitForUpOrCancellation(); pressed = false } }) {
                     // The exchange in front, with the steps from before a tap on its question (a look-up keeps its sources line).

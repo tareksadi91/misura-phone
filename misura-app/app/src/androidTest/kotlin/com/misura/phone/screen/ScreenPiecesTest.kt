@@ -104,6 +104,24 @@ class ScreenPiecesTest {
         annotated.text.substring(links.single().start, links.single().end) shouldBe "[Original report]"
     }
 
+    @Test fun stepCountStaysWholeBesideHomeAtLargeTextOnANarrowScreen() {
+        rule.setContent {
+            val d = androidx.compose.ui.platform.LocalDensity.current
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d.density, 2f)) {
+                MisuraSurface { Box(Modifier.width(320.dp).testTag("narrow")) { NavLine("Home", "When did the Berlin TV tower open to the public", 12, onBack = {}, onSteps = {}) } }
+            }
+        }
+        val node = rule.onNodeWithContentDescription("12 steps", useUnmergedTree = true).fetchSemanticsNode()
+        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        node.config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult].action!!.invoke(layouts)
+        val l = layouts.single()
+        val natural = kotlin.math.ceil(l.multiParagraph.intrinsics.maxIntrinsicWidth).toInt()
+        val screen = rule.onNodeWithTag("narrow").fetchSemanticsNode().boundsInRoot.right
+        check(node.size.width >= natural - 1 && node.boundsInRoot.right <= screen + 1) {
+            "count cut: '${l.layoutInput.text}' needs $natural px, has ${node.size.width}, ends at ${node.boundsInRoot.right} of $screen" }
+        rule.onNodeWithText("‹ Home").assertExists()
+    }
+
     @Test fun stepsAreAPoliteLiveRegion() {
         steps(step(StepState.RUNNING))
         rule.onNodeWithTag(STEPS_TAG).assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))

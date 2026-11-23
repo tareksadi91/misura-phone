@@ -81,9 +81,9 @@ fun homeLine(s: Session, asked: String, stale: Boolean = false, sent: Set<String
     return listOfNotNull(asked, state).joinToString(" · ")
 }
 
-/** The nav line's "‹ …" label: what back returns to, or null at the root. */
-fun backLabel(s: Session, facts: Map<String, PlaceFact>, nav: Nav): String? {
-    val under = nav.stack.getOrNull(nav.stack.size - 2) ?: return null
+/** The nav line's "‹ …" label: what back returns to; at a task's root that is Home (same path as the home gesture). */
+fun backLabel(s: Session, facts: Map<String, PlaceFact>, nav: Nav): String {
+    val under = nav.stack.getOrNull(nav.stack.size - 2) ?: return "Home"
     return when (under) {
         Screen.Root -> s.places?.placeIds?.size?.let { if (it == 1) "1 place" else "$it places" } ?: s.items?.itemIds?.size?.let { if (it == 1) "1 item" else "$it items" } ?: "Back"
         is Screen.Detail -> facts[under.placeId]?.label ?: "Back"

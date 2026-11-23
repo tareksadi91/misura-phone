@@ -449,6 +449,14 @@ class UseApp(
             val stuck = mutableSetOf<Boolean>(); var stuckAt: String? = null // true = up moved nothing, false = down
             fun unstick(now: String) { if (stuck.isNotEmpty() && now != stuckAt) { stuck.clear(); stuckAt = null } }
             fun fingerprint(seen: List<Seen>) = seen.joinToString("\n") { x -> x.words + x.bounds.toList() }
+            // A tap the model already made on this exact screen (same words in the same places, same element): it is told so, once per repeat.
+            // A sports-club app's filter sheet (23 Nov) was opened and confirmed unchanged ten times until the steps ran out. A hint, never a stop:
+            // a retry or a second look can be right, and the model decides. Only taps that went through count.
+            // ponytail: taps only; a loop made of back/enter/scroll, or a screen whose words never settle (a live map), is not caught.
+            // The screen is the one the model saw when it chose (a sibling may change before the tap lands: the line says "looked the same", Codex review).
+            // Its key adds each switch's on/off, which lives only in the line, not in the words (Codex review: a switch tapped back read as a repeat).
+            val tappedAt = mutableMapOf<String, Int>(); var repeats = 0
+            fun tapScreen(seen: List<Seen>) = seen.joinToString("\n") { x -> x.words + x.bounds.toList() + x.line.substringAfterLast('"') }
             // Steps (speed, 22 Nov): the rest of a steps call, run as rounds without a model call. Bound to what the model knew when it
             // planned them ([plannedWith] = words heard then); any stop clears them and the model sees the screen there (Codex audit).
             val queue = ArrayDeque<JsonObject>(); var plannedWith = 0; var stepNo = 0; var stepsTotal = 0; var modelRounds = 0
@@ -630,7 +638,11 @@ class UseApp(
                     val label = (listOf(e.words, taker.label()) + inner).firstOrNull { commitWord(it) != null }
                         ?: here.drop(i + 1).firstOrNull { commitWord(it.label()) != null }?.label()
                     if (label != null) when (val g = gated(label, e, "tap “${cardWords(label)}”")) { null -> Unit; else -> return g }
-                    return if (HiddenInput.tap(s, x, y)) "tapped ${e.line}" else "tap on ${e.line} did not go through"
+                    if (!HiddenInput.tap(s, x, y)) return "tap on ${e.line} did not go through"
+                    val key = "${tapScreen(seen)}\u0000${e.words}${b.toList()}"
+                    val before = tappedAt.put(key, did.size + 1) ?: return "tapped ${e.line}"
+                    repeats++
+                    return "tapped ${e.line}; you made the same tap on a same-looking screen at step $before. If it did not help then, try another route instead of repeating it"
                 }
                 /** Enter, where focus is now. */
                 suspend fun pressEnter(): Any {
@@ -668,7 +680,8 @@ class UseApp(
                         if (!show) { if (things.isNotEmpty()) keepItems(); return out(done) }
                         return out(if (runCatching { hidden.moveToMain(s, pkg) }.getOrDefault(false)) buildJsonObject { done.forEach { (k, v) -> put(k, v) }; put("shown", true) } else err("couldn't bring it to your screen"))
                     }
-                    "fail" -> return out(err(c.args.str("reason") ?: "could not do it"))
+                    // gaveUp keeps what was noted on the way (Codex audit 23 Nov: fail dropped the notes; items were kept by out already).
+                    "fail" -> return gaveUp(c.args.str("reason") ?: "could not do it")
                     "item" -> { val tr = System.nanoTime(); val root = ScreenReader.read(s) ?: look.root; split.append(" reread=${ms(tr)}ms"); recordItem(c, root, seen) { what, from -> split.append(" $what=${ms(from)}ms") }.let { r -> if (r == CUT_OFF && !late()) { scrolledOne = true; recordScrolled(c, root, words.size) } else r } }
                     "tap" -> el()?.let { e -> when (val r = tapOn(e)) { is JsonObject -> return r; else -> r as String } } ?: "no such element"
                     "type" -> el()?.let { e ->
@@ -708,7 +721,8 @@ class UseApp(
                 // A round that only recorded or noted leaves the screen as it was: no pause (unless it scrolled a cut-off one into view).
                 if (!((c.name == "item" || c.name == "note") && !scrolledOne)) delay(SETTLE_MS)
             }
-            return gaveUp("didn't finish in $maxActions steps")
+            // Out of steps, not out of time. Repeated taps are named only when they happened (a long, productive run doesn't claim circles).
+            return gaveUp("didn't finish in $maxActions steps" + if (repeats >= 2) ": kept repeating the same taps ($repeats repeats)" else "")
         } finally {
             endRun(heard, keep, s)
         }

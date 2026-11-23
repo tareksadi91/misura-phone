@@ -1268,7 +1268,66 @@ class HiddenChatTest {
         hand.stopped(); gone() shouldBe true
     }
 
+    /**
+     * A model stuck on a filter that changes nothing (sports-club app, 23 Nov: Workout Types → Confirm → back, ten times, out of steps).
+     * The hand tells it the same tap on the same screen was already done; a model that reacts takes the other route and finishes.
+     * Red before the hint: no such line ever comes, the scripted model keeps looping and the run runs out of steps.
+     */
+    @Test fun aRepeatedTapOnTheSameScreenIsPointedOut(): Unit = runBlocking {
+        val prompts = mutableListOf<String>()
+        var other = false; var picked = false
+        val brain = brainOf({ t ->
+            prompts += t
+            if (REPEAT_HINT in t) other = true
+            when {
+                "TestChat" in t -> "tap" to args("i" to at(t, "Venues"))
+                "Status: Fitness only" in t -> "done" to args("result" to "fitness venues")
+                "Status:" in t -> "tap" to args("i" to at(t, if (other) "Categories" else "Workout Types"))
+                "Not checked" in t && !picked -> { picked = true; "tap" to args("i" to at(t, "Fitness")) }
+                else -> "tap" to args("i" to at(t, "Confirm")) // a sheet: confirm it as it is (the sports-club model's move)
+            }
+        })
+        val r = mk(brain, maxActions = 14).run(goal())
+        check(r["error"] == null) { "ran out instead of taking the other route: $r\nlast screen: ${prompts.lastOrNull()}" }
+        check(prompts.any { "Status: Fitness only" in it }) { prompts.last() }
+        // The hint came on the first repeat (lap two), not after the loop had burned the budget.
+        check(prompts.indexOfFirst { REPEAT_HINT in it } in 1..5) { prompts.joinToString("\n---\n") }
+    }
+
+    /** A hand that gives up still hands back what it noted on the way (fail dropped the notes before 23 Nov; running out kept them). */
+    @Test fun aFailingHandKeepsItsNotes(): Unit = runBlocking {
+        val r = mk(brainOf({ _ -> "note" to args("text" to "Gym A is open till 22") }, { _ -> "fail" to args("reason" to "no such filter in this app") })).run(goal())
+        val err = (r["error"] as kotlinx.serialization.json.JsonPrimitive).content
+        err.lineSequence().first() shouldBe "no such filter in this app"   // the step line: the model's reason alone
+        check("Found so far: Gym A is open till 22" in err) { err }
+    }
+
+    /** Different taps on the same screen (one filter, then the other) and a switch tapped back and forth are no repeat. */
+    @Test fun differentTapsOnTheSameScreenAreNoRepeat(): Unit = runBlocking {
+        val prompts = mutableListOf<String>()
+        var n = 0
+        val brain = brainOf({ t ->
+            prompts += t
+            when (n++) {
+                0 -> "tap" to args("i" to at(t, "Venues"))
+                1 -> "tap" to args("i" to at(t, "Categories"))
+                2, 3 -> "tap" to args("i" to at(t, "Fitness")) // checked, then unchecked: each tap starts from a different screen
+                4 -> "tap" to args("i" to at(t, "Confirm"))
+                5 -> "tap" to args("i" to at(t, "Workout Types"))
+                6 -> "tap" to args("i" to at(t, "Confirm"))
+                7, 8 -> "tap" to args("i" to at(t, "Open now")) // a native switch on, then off: on/off is its checked state, not its words (Codex review)
+                else -> "done" to args("result" to "ok")
+            }
+        })
+        val r = mk(brain, maxActions = 12).run(goal())
+        check(r["error"] == null) { r.toString() }
+        check(prompts.size == 10) { prompts.joinToString("\n---\n") }
+        check(prompts.none { REPEAT_HINT in it }) { prompts.first { REPEAT_HINT in it } }
+    }
+
     companion object {
+        /** Words of the hand's repeat line the scripted models react to. */
+        const val REPEAT_HINT = "same tap on a same-looking screen"
         const val TEST_PKG = "com.misura.testapp"
         const val A11Y = "com.misura.phone/com.misura.phone.hidden.MisuraAccessibility"
         const val ENTRY = "$TEST_PKG:id/entry"

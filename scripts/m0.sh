@@ -8,6 +8,8 @@ set -uo pipefail
 dir=${1:?Give an output directory outside the repo}; mkdir -p "$dir"; out=$dir/results.md
 a() { adb -s "$ANDROID_SERIAL" shell "$@"; }
 log() { a logcat -d -s MisuraAgent 2>/dev/null; }
+# turn: only this ask's lines (from its "user turn (N chars)"), so another session's tail can't count
+turn() { log | awk -v m="user turn ($qlen chars)" 'index($0, m) { p = 1 } p'; }
 fg() { a dumpsys activity activities | grep -m1 topResumedActivity | grep -o '[a-z0-9._]*/[A-Za-z0-9._$]*'; }
 screen() { a uiautomator dump /sdcard/m0.xml >/dev/null 2>&1; a cat /sdcard/m0.xml | grep -o 'text="[^"]*"' | grep -v 'text=""' | sed 's/text=//' | tr '\n' ' ' | cut -c1-600; }
 # Result alerts by tag (result:<session>), never content; the routine's working notice has another tag. Home clears old
@@ -26,10 +28,10 @@ row() { printf '| %s | %s | %s |\n' "$1" "$2" "$3" >> "$out"; }
 ask() {
   [ "${2:-}" = keep ] || { a input keyevent KEYCODE_HOME; sleep 2; }
   a logcat -c
-  local q=${1//\'/}; a "am broadcast -n com.misura.phone/.debug.DebugReceiver --es cmd ask --es text '$q'" >/dev/null
-  for _ in $(seq 1 60); do sleep 2; log | grep -q 'tool: answer\|tool: show_places\|tool: open_app\|tool: routine' && break; done
+  local q=${1//\'/}; qlen=${#q}; a "am broadcast -n com.misura.phone/.debug.DebugReceiver --es cmd ask --es text '$q'" >/dev/null
+  for _ in $(seq 1 60); do sleep 2; turn | grep -q 'tool: answer\|tool: show_places\|tool: open_app\|tool: routine' && break; done
   sleep 4
-  tools=$(log | grep -o 'tool: [a-z_]*\|use_app [a-z.]* #[0-9]*: [a-z_]*' | sed 's/tool: //' | tr '\n' ' ')
+  tools=$(turn | grep -o 'tool: [a-z_]*\|use_app [a-z.]* #[0-9]*: [a-z_]*' | sed 's/tool: //' | tr '\n' ' ')
   front=$(fg); text=$(screen)
   printf '\n## %s\nfront: %s\nroute: %s\nscreen: %s\n' "$1" "$front" "$tools" "$text" >> "$dir/detail.md"
 }
@@ -51,7 +53,7 @@ sleep 3; n1=$(notes);                             k=$(new "$n0" "$n1"); row 7 "R
 a input keyevent KEYCODE_HOME; sleep 2; n1h=$(notes)   # baseline for task 9 after Home cleared task 7
 ask "How many notifications do I have? Only the number" keep; row 8 Notifications "$(pass '[[ $tools == *read_notifications* ]]') $tools"
 n2=$(notes);                                      k=$(new "$n1h" "$n2"); row 9 "No alert at Home" "$(pass '[ "$k" -eq 0 ]') new result alerts: $k"
-ask "Open example.com in Chrome and tell me the page heading"; row 10 "Browser" "$(pass '[[ $tools == *"use_app com.android.chrome"* ]]') $tools"
+ask "Open info.cern.ch in Chrome and tell me the page heading"; row 10 "Browser" "$(pass '[[ $tools == *"use_app com.android.chrome"* && $text == *"first website"* ]]') $tools"
 ask "Open Shizuku";                               row 11 "Protected app" "$(pass '[[ $front != *shizuku* ]]') front=$front"
 
 at=$(a date -d @$(( $(a date +%s) + 180 )) +%H:%M 2>/dev/null || date -v+3M +%H:%M)

@@ -883,6 +883,28 @@ class HomeFlowTest {
         return up
     }
 
+    @Test fun aLookedUpAnswerShowsSourceTagsThatOpenTheSource() {
+        val id = java.util.UUID.randomUUID().toString()
+        val lookUp = object : Tool {
+            override val spec = ToolSpec("look_up", "Search", JsonObject(emptyMap()))
+            override suspend fun run(args: JsonObject) = Json.parseToJsonElement("""{"status":"complete","lookup_id":"$id","provider":"Exa",
+                "answer":"It opened on 7 October 1969.","citations":[{"title":"Berlin TV Tower - Wikipedia","url":"https://en.wikipedia.org/wiki/Fernsehturm_Berlin"}]}""").jsonObject
+            override fun label(args: JsonObject) = "Looking it up"
+            override fun summary(result: JsonObject) = "Exa"
+        }
+        val agent = Agent(store, Script(call("look_up", """{"query":"tv tower"}"""), call("answer", """{"line":"x","lookup_id":"$id"}""")),
+            listOf(places, lookUp), System::currentTimeMillis, scope)
+        rule.setContent { HomeScreen(agent, store, photos = null, openRequest = null) }
+        ask("When did the Berlin TV tower open")
+        waitText("7 October 1969")
+        rule.onAllNodes(hasText("Berlin TV Tower - Wikipedia", substring = true)).assertCountEquals(0) // no title on the answer screen
+        rule.onNodeWithContentDescription("Source 1, en.wikipedia.org").performClick()
+        waitText("Berlin TV Tower - Wikipedia")
+        rule.onNodeWithText("https://en.wikipedia.org/wiki/Fernsehturm_Berlin").assertExists()
+        rule.onNodeWithText("Close").performClick()
+        rule.waitUntil(5_000) { rule.onAllNodes(hasText("Berlin TV Tower - Wikipedia")).fetchSemanticsNodes().isEmpty() }
+    }
+
     private fun swipeTask(text: String, far: Boolean = true) {
         rule.onNodeWithText(text).performTouchInput {
             swipeLeft(startX = width * .85f, endX = width * (if (far) .1f else .65f), durationMillis = 300)

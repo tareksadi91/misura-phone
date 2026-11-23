@@ -70,6 +70,16 @@ class LookUpTest {
         }
     }
 
+    @Test fun exaSourceListedTwiceKeepsLaterTagNumbersOnExasOwnMarkers() = runBlocking<Unit> {
+        val payload = """{"answer":"Fact [1][3].","citations":[{"url":"https://a.org/1","title":"A"},{"url":"https://a.org/1","title":"A"},{"url":"https://b.org/2","title":"B"}]}"""
+        TinyHttp { 200 to payload }.use { http ->
+            val lookup = LookUp({ error("no Google") }, { error("no Google") }, exaKey = { "fixture" }, exaBase = http.base)
+            val answer = lookup.run(q).sourcedAnswer()!!
+            // "[3]" in Exa's text is B: the tag must say 3, so the provider's list reaches the screen unchanged.
+            com.misura.phone.screen.sourcesOf(answer.citations, answer.line).map { it.n to it.host } shouldBe listOf(1 to "a.org", 3 to "b.org")
+        }
+    }
+
     @Test fun longSourceTitleDoesNotDiscardSuccessfulExaAnswer() = runBlocking<Unit> {
         val payload = exa.replace("\"url\":", "\"title\":\"${"Long source title ".repeat(30)}\",\"url\":")
         TinyHttp { 200 to payload }.use { http ->

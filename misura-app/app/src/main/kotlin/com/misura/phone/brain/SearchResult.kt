@@ -21,7 +21,7 @@ internal fun source(url: String, title: String?, start: Int? = null, end: Int? =
 
 internal fun complete(text: String?, sources: List<Citation>, provider: String): LookupResult {
     if (text.isNullOrBlank() || text.length > 16000 || sources.size !in 1..64 || sources.any { !it.validFor(text) }) return LookupResult.Partial
-    return LookupResult.Complete(text, sources.distinct(), provider)
+    return LookupResult.Complete(text, sources, provider) // unchanged order: Exa writes "[n]" by it, and the tags show n
 }
 
 internal fun LookupResult.reply() = buildJsonObject {

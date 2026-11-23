@@ -86,22 +86,50 @@ class ScreenPiecesTest {
     private fun step(state: StepState, result: String? = null) = Step("a", 1, "Searching bibimbap", state, result, startedAt = 0)
     private fun steps(vararg s: Step, now: Long = 0) = rule.setContent { MisuraSurface { Steps(s.toList(), now) } }
 
-    @Test fun currentAttributionContainsAnAccessibleInlineLink() = assertCitation(historical = false)
-    @Test fun historicalAttributionContainsAnAccessibleInlineLink() = assertCitation(historical = true)
+    @Test fun currentAttributionIsANumberAndATagThatOpensTheSource() = assertCitation(historical = false)
+    @Test fun historicalAttributionIsANumberAndATagThatOpensTheSource() = assertCitation(historical = true)
 
     private fun assertCitation(historical: Boolean) {
-        val cited = Say.Answer("A fact.", listOf(com.misura.core.agent.Citation("Original report", "https://example.org/report", 0, 6)), "OpenAI")
+        val cited = Say.Answer("A fact.", listOf(com.misura.core.agent.Citation("Original report", "https://www.example.org/report", 0, 6)), "OpenAI")
+        val opened = mutableListOf<String>()
         rule.setContent {
-            MisuraSurface {
-                if (historical) Past("Question", emptyList(), cited.line, 0, cited = cited)
-                else AnswerText(cited.line, cited = cited)
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides object : androidx.compose.ui.platform.UriHandler {
+                override fun openUri(uri: String) { opened += uri }
+            }) {
+                MisuraSurface {
+                    if (historical) Past("Question", emptyList(), cited.line, 0, cited = cited)
+                    else AnswerText(cited.line, cited = cited)
+                }
             }
         }
-        val annotated = rule.onNodeWithText("Original report", substring = true).fetchSemanticsNode()
-            .config[SemanticsProperties.Text].single()
-        val links = annotated.getLinkAnnotations(0, annotated.length)
-        (links.single().item as androidx.compose.ui.text.LinkAnnotation.Url).url shouldBe "https://example.org/report"
-        annotated.text.substring(links.single().start, links.single().end) shouldBe "[Original report]"
+        // In the text: a number where the source was placed, never the title.
+        val annotated = rule.onNodeWithText("A fact", substring = true).fetchSemanticsNode().config[SemanticsProperties.Text].single()
+        annotated.text.contains("Original report") shouldBe false
+        val link = annotated.getLinkAnnotations(0, annotated.length).single()
+        annotated.text.substring(link.start, link.end) shouldBe "1"
+        (link.item is androidx.compose.ui.text.LinkAnnotation.Clickable) shouldBe true
+        rule.onNodeWithText("OpenAI").assertDoesNotExist() // the provider is named in the step line, not under the answer
+        // Under it: a tag; its sheet has the full title and address; Open hands the original address on.
+        rule.onNodeWithContentDescription("Source 1, example.org").assertHeightIsAtLeast(48.dp).performClick()
+        rule.onNodeWithText("Original report").assertExists()
+        rule.onNodeWithText("https://www.example.org/report").assertExists()
+        rule.onNodeWithText("Open ↗").performClick()
+        rule.runOnIdle { opened shouldBe listOf("https://www.example.org/report") }
+    }
+
+    @Test fun tagsShowThreeSourcesByTheirListNumberThenTheRest() {
+        val c = { t: String, u: String -> com.misura.core.agent.Citation(t, u) }
+        val cited = Say.Answer("Fact [1][3].", listOf(c("A", "https://a.org/1"), c("A again", "https://a.org/1"), c("B", "https://b.org/x"),
+            c("C", "https://sub.c.org/y"), c("D", "https://d.org/z")), "Exa")
+        rule.setContent { MisuraSurface { AnswerText(cited.line, cited = cited) } }
+        rule.onNodeWithText("Fact [1][3].").assertExists() // the provider's own markers stay as written
+        rule.onNodeWithContentDescription("Source 1, a.org").assertExists()
+        rule.onNodeWithContentDescription("Source 3, b.org").assertExists() // its place in the list, not renumbered after the repeat
+        rule.onNodeWithContentDescription("Source 4, sub.c.org").assertExists()
+        rule.onNodeWithContentDescription("Source 5, d.org").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Show 1 more source").performClick()
+        rule.onNodeWithText("5 · d.org").assertExists().performClick()
+        rule.onNodeWithText("https://d.org/z").assertExists()
     }
 
     @Test fun stepsAreAPoliteLiveRegion() {

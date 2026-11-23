@@ -1,11 +1,14 @@
 package com.misura.phone.screen
 
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withLink
-import androidx.compose.ui.text.style.TextDecoration
 import com.misura.core.agent.Say
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
@@ -222,23 +225,35 @@ fun Past(asked: String, steps: List<Step>, answer: String?, now: Long, modifier:
 
 /** Misura's answer as screen text: short ones big ("Booked."), longer ones at said size. */
 /** Long ones (an explanation, a view) drop to echo size in text colour: at said size 120 words ran over two screens. */
+/**
+ * A sourced answer: small orange numbers where the provider placed a source in the text, one line of tags under it, and
+ * the full title and address only in a sheet. Text the provider wrote (Exa's own "[n]") is shown as written.
+ */
 @Composable
 fun AnswerText(line: String, modifier: Modifier = Modifier, cited: Say.Answer? = null) {
+    val citations = cited?.takeIf { it.line == line }?.citations.orEmpty()
+    val sources = remember(line, citations) { sourcesOf(citations, line) }
+    // The sheet belongs to this answer: a new answer in the same place starts closed.
+    var sheet by remember(line, citations) { mutableStateOf<SourceSheet?>(null) }
     val text = buildAnnotatedString {
+        val byUrl = sources.associateBy { it.url }
         var at = 0
-        val citations = cited?.takeIf { it.line == line }?.citations.orEmpty().filter { it.validFor(line) }
-        for ((end, sources) in citations.groupBy { it.end ?: line.length }.toSortedMap()) {
+        val placed = citations.filter { it.end != null && it.validFor(line) }.groupBy { it.end!! }.toSortedMap()
+        for ((end, group) in placed) {
             append(line.substring(at, end))
-            for (source in sources) {
-                append(" ")
-                withLink(LinkAnnotation.Url(source.url, TextLinkStyles(SpanStyle(textDecoration = TextDecoration.Underline)))) {
-                    append("[${source.title}]")
-                }
+            for (src in group.mapNotNull { byUrl[it.url] }.distinct()) {
+                append("\u2009")
+                withLink(LinkAnnotation.Clickable("source ${src.n}", TextLinkStyles(SpanStyle(color = M.orange, fontSize = 0.62.em, baselineShift = BaselineShift.Superscript))) {
+                    sheet = SourceSheet.One(src)
+                }) { append("${src.n}") }
             }
             at = end
         }
         append(line.substring(at))
-        if (citations.isNotEmpty()) cited?.provider?.let { append("\n$it") }
     }
-    Text(text, style = when { line.length <= 24 -> ST.outcome; line.length <= 160 -> ST.said; else -> ST.echo.copy(color = M.text) }, modifier = modifier)
+    Column(modifier) {
+        Text(text, style = when { line.length <= 24 -> ST.outcome; line.length <= 160 -> ST.said; else -> ST.echo.copy(color = M.text) })
+        if (sources.isNotEmpty()) SourceTags(sources, { sheet = it }, Modifier.padding(top = 5.u))
+    }
+    sheet?.let { SourceDetails(it, sources, onPick = { s -> sheet = SourceSheet.One(s) }, onClose = { sheet = null }) }
 }

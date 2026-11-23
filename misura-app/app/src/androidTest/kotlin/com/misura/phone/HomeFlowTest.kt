@@ -868,6 +868,21 @@ class HomeFlowTest {
         rule.onNodeWithText("‹ Home").assertDoesNotExist()
     }
 
+    @Test fun homeLineWithTheKeyboardUpClosesItAndShowsHome() {
+        messaging(Script(draft), mutableListOf()); ask("tell FriendA we'll be there in 5"); waitText("There in 5")
+        rule.onNodeWithContentDescription(ASK_FIELD).performClick()
+        rule.waitUntil(5_000) { keyboardIsUp() }
+        rule.onNodeWithText("‹ Home").performClick()
+        waitKeyboardClosed()
+        waitText("Message to FriendA") // Home's lines show again: the keyboard no longer hides them
+    }
+    private fun keyboardIsUp(): Boolean {
+        val a = (rule as androidx.compose.ui.test.junit4.AndroidComposeTestRule<*, *>).activity
+        var up = false
+        rule.runOnUiThread { up = (androidx.core.view.ViewCompat.getRootWindowInsets(a.window.decorView)?.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())?.bottom ?: 0) > 0 }
+        return up
+    }
+
     private fun swipeTask(text: String, far: Boolean = true) {
         rule.onNodeWithText(text).performTouchInput {
             swipeLeft(startX = width * .85f, endX = width * (if (far) .1f else .65f), durationMillis = 300)

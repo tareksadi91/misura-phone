@@ -606,6 +606,56 @@ class UseApp(
                         })
                     }
                 }
+                // tapOn and pressEnter are local functions only so they compile to their own JVM methods: work() sits at the method-size limit.
+                // Same contract as gated: a String = told to the model; a JsonObject = the run ends with it.
+                /** One tap on [e], checked against the screen as it is now. */
+                suspend fun tapOn(e: Seen): Any {
+                    val b = e.bounds; val x = (b[0] + b[2]) / 2; val y = (b[1] + b[3]) / 2
+                    // Every tap is checked against the screen as it is now, not only one whose old words already said "Send" (Codex audit
+                    // 21 Nov): a "Preview" can turn into "Submit" while the model thinks, and a wordless button can hold a "Send" child.
+                    // Only the nodes under the tap point are read: a few IPCs, not the whole tree.
+                    val here = ScreenReader.under(s, x, y) ?: return "the screen can't be read right now; look again"
+                    val i = here.indexOfLast { it.bounds.contentEquals(b) && it.label() == e.words && it.editable == e.editable }
+                    if (i < 0) return "the screen changed before the tap on ${e.line}; look again"
+                    if (late()) return gaveUp("took too long")
+                    // What takes the tap: the element if it is clickable, else its nearest clickable parent (a plain word inside a "Send" button).
+                    val taker = here.take(i + 1).lastOrNull { it.clickable } ?: here[i]
+                    // A wordless button made of a few parts says what it does through them; a big wordless row (a chat in a list) does not.
+                    // Only when the model picked that wordless control itself, button-high, with a few short words ("Send", "Jetzt senden"):
+                    // a chat row opened by its name, or with a preview like "Buy milk", is not a Buy button (Codex re-check).
+                    // ponytail: button = under 1/12 of the screen high, ≤3 parts of ≤2 words; other wordless controls stay a documented gap.
+                    val buttonHigh = taker.bounds[3] - taker.bounds[1] < H / 12
+                    val inner = if (taker === here[i] && buttonHigh && taker.label().isEmpty()) taker.labelsInside().takeIf { it.size <= 3 }.orEmpty().filter { it.trim().split(Regex("\\s+")).size <= 2 } else emptyList()
+                    // Its own words, the taker's, a small button's inner words, then anything drawn at that spot inside it or on top of it.
+                    val label = (listOf(e.words, taker.label()) + inner).firstOrNull { commitWord(it) != null }
+                        ?: here.drop(i + 1).firstOrNull { commitWord(it.label()) != null }?.label()
+                    if (label != null) when (val g = gated(label, e, "tap “${cardWords(label)}”")) { null -> Unit; else -> return g }
+                    return if (HiddenInput.tap(s, x, y)) "tapped ${e.line}" else "tap on ${e.line} did not go through"
+                }
+                /** Enter, where focus is now. */
+                suspend fun pressEnter(): Any {
+                    // Enter can send what was typed (chat apps set to send on Enter, one-field forms): with words in a field that is
+                    // not a search box it goes through the same gate as a Send tap. A search stays one step.
+                    // The whole screen (a field past the model's 150 lines still counts), and the field that has focus: Enter goes there.
+                    val root = screen(s, tries = 5)?.root ?: return "the screen can't be read right now; look again"
+                    val now = flatten(root, W, H, max = Int.MAX_VALUE)
+                    if (late()) return gaveUp("took too long")
+                    val focus = now.firstOrNull { it.focused }
+                    val typed = now.filter { it.editable && it.text.isNotBlank() && !it.search }
+                    val anyFocus = root.find { it.focused }
+                    // Enter on a focused button presses it: that is a tap, judged by the tap path (commit words, fresh check).
+                    if (anyFocus != null && !anyFocus.editable) return "not done: Enter would press the focused button; tap the element you mean instead"
+                    // Focus in a field that is off screen (not among the lines) is unknown territory: scroll to it first.
+                    if (focus == null && anyFocus != null) return "not done: Enter would go to a field that is off the screen; scroll to it first"
+                    // Typed words on screen but no field has focus: where Enter goes is unknown, so nothing is pressed until a field is
+                    // tapped (Codex re-check). Unknown focus never means harmless.
+                    if (focus == null && typed.isNotEmpty()) return "not done: no field has focus; tap the field Enter is for, then press enter"
+                    // A focused search box searches. Otherwise typed words ask, tied to the focused field; the gate re-checks that focus is still
+                    // there before a yes is spent, so a yes for form A never presses Enter in form B.
+                    if (focus != null && !focus.search && typed.isNotEmpty())
+                        when (val g = gated("Enter", focus, "press Enter")) { null -> Unit; else -> return g }
+                    hidden.key(s, 66); return "pressed enter"
+                }
                 // What the step line says right now, in plain words; nothing for done/fail (the step closes).
                 stepLine(c, el())?.let { note("$app: $it") }
                 // Last look before a queued step touches anything: new words from the user win over the plan (Codex audit P1).
@@ -620,28 +670,7 @@ class UseApp(
                     }
                     "fail" -> return out(err(c.args.str("reason") ?: "could not do it"))
                     "item" -> { val tr = System.nanoTime(); val root = ScreenReader.read(s) ?: look.root; split.append(" reread=${ms(tr)}ms"); recordItem(c, root, seen) { what, from -> split.append(" $what=${ms(from)}ms") }.let { r -> if (r == CUT_OFF && !late()) { scrolledOne = true; recordScrolled(c, root, words.size) } else r } }
-                    "tap" -> el()?.let { e ->
-                        val b = e.bounds; val x = (b[0] + b[2]) / 2; val y = (b[1] + b[3]) / 2
-                        // Every tap is checked against the screen as it is now, not only one whose old words already said "Send" (Codex audit
-                        // 21 Nov): a "Preview" can turn into "Submit" while the model thinks, and a wordless button can hold a "Send" child.
-                        // Only the nodes under the tap point are read: a few IPCs, not the whole tree.
-                        val here = ScreenReader.under(s, x, y) ?: return@let "the screen can't be read right now; look again"
-                        val i = here.indexOfLast { it.bounds.contentEquals(b) && it.label() == e.words && it.editable == e.editable }
-                        if (i < 0) return@let "the screen changed before the tap on ${e.line}; look again"
-                        if (late()) return gaveUp("took too long")
-                        // What takes the tap: the element if it is clickable, else its nearest clickable parent (a plain word inside a "Send" button).
-                        val taker = here.take(i + 1).lastOrNull { it.clickable } ?: here[i]
-                        // A wordless button made of a few parts says what it does through them; a big wordless row (a chat in a list) does not.
-                        // Only when the model picked that wordless control itself, button-high, with a few short words ("Send", "Jetzt senden"):
-                        // a chat row opened by its name, or with a preview like "Buy milk", is not a Buy button (Codex re-check).
-                        // ponytail: button = under 1/12 of the screen high, ≤3 parts of ≤2 words; other wordless controls stay a documented gap.
-                        val buttonHigh = taker.bounds[3] - taker.bounds[1] < H / 12
-                        val inner = if (taker === here[i] && buttonHigh && taker.label().isEmpty()) taker.labelsInside().takeIf { it.size <= 3 }.orEmpty().filter { it.trim().split(Regex("\\s+")).size <= 2 } else emptyList()
-                        // Its own words, the taker's, a small button's inner words, then anything drawn at that spot inside it or on top of it.
-                        val label = (listOf(e.words, taker.label()) + inner).firstOrNull { commitWord(it) != null }
-                            ?: here.drop(i + 1).firstOrNull { commitWord(it.label()) != null }?.label()
-                        if (label != null) when (val g = gated(label, e, "tap “${cardWords(label)}”")) { null -> Unit; is String -> return@let g; else -> return g as JsonObject }
-                        if (HiddenInput.tap(s, x, y)) "tapped ${e.line}" else "tap on ${e.line} did not go through" } ?: "no such element"
+                    "tap" -> el()?.let { e -> when (val r = tapOn(e)) { is JsonObject -> return r; else -> r as String } } ?: "no such element"
                     "type" -> el()?.let { e ->
                         val text = c.args.str("text").orEmpty()
                         if (queued != null) typeCheck(s, e, c.args[FOCUSED_SEARCH] != null, ::late) { synchronized(lock) { heard.size } > plannedWith }?.let { why ->
@@ -650,29 +679,7 @@ class UseApp(
                     } ?: "no such element"
                     "key" -> when (c.args.str("name")) {
                         "back" -> { hidden.key(s, 4); "pressed back" }
-                        "enter" -> run {
-                            // Enter can send what was typed (chat apps set to send on Enter, one-field forms): with words in a field that is
-                            // not a search box it goes through the same gate as a Send tap. A search stays one step.
-                            // The whole screen (a field past the model's 150 lines still counts), and the field that has focus: Enter goes there.
-                            val root = screen(s, tries = 5)?.root ?: return@run "the screen can't be read right now; look again"
-                            val now = flatten(root, W, H, max = Int.MAX_VALUE)
-                            if (late()) return gaveUp("took too long")
-                            val focus = now.firstOrNull { it.focused }
-                            val typed = now.filter { it.editable && it.text.isNotBlank() && !it.search }
-                            val anyFocus = root.find { it.focused }
-                            // Enter on a focused button presses it: that is a tap, judged by the tap path (commit words, fresh check).
-                            if (anyFocus != null && !anyFocus.editable) return@run "not done: Enter would press the focused button; tap the element you mean instead"
-                            // Focus in a field that is off screen (not among the lines) is unknown territory: scroll to it first.
-                            if (focus == null && anyFocus != null) return@run "not done: Enter would go to a field that is off the screen; scroll to it first"
-                            // Typed words on screen but no field has focus: where Enter goes is unknown, so nothing is pressed until a field is
-                            // tapped (Codex re-check). Unknown focus never means harmless.
-                            if (focus == null && typed.isNotEmpty()) return@run "not done: no field has focus; tap the field Enter is for, then press enter"
-                            // A focused search box searches. Otherwise typed words ask, tied to the focused field; the gate re-checks that focus is still
-                            // there before a yes is spent, so a yes for form A never presses Enter in form B.
-                            if (focus != null && !focus.search && typed.isNotEmpty())
-                                when (val g = gated("Enter", focus, "press Enter")) { null -> Unit; is String -> return@run g; else -> return g as JsonObject }
-                            hidden.key(s, 66); "pressed enter"
-                        }
+                        "enter" -> when (val r = pressEnter()) { is JsonObject -> return r; else -> r as String }
                         else -> "unknown key"
                     }
                     "scroll" -> run {

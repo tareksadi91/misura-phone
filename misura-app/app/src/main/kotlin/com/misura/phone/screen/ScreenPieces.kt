@@ -196,15 +196,19 @@ fun Thinking(modifier: Modifier = Modifier) = Box(modifier.fillMaxWidth().testTa
  */
 @Composable
 fun NavLine(back: String?, here: String, stepCount: Int, onBack: () -> Unit, onSteps: () -> Unit, modifier: Modifier = Modifier) {
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         if (back != null) Text("‹ $back", style = ST.nav, color = M.text, maxLines = 1,
             modifier = Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = "Back", onClick = onBack).padding(end = 12.u).wrapCenter())
         // Root: what you asked takes the free width; ellipsis only if it really doesn't fit.
         else Text(here, style = ST.nav, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).heightIn(min = 48.dp).wrapCenter())
-        if (back != null) Spacer(Modifier.weight(1f))
-        val right = listOfNotNull(here.takeIf { back != null }, if (stepCount > 0) "$stepCount ${if (stepCount == 1) "step" else "steps"} ›" else null).joinToString(" · ")
-        if (right.isNotEmpty()) Text(right, style = ST.nav, maxLines = 1,
-            modifier = Modifier.heightIn(min = 48.dp).clickable(enabled = stepCount > 0, role = Role.Button, onClickLabel = "History", onClick = onSteps).padding(start = 12.u).wrapCenter())
+        // With "‹ …" on the left, your words take what's left and end in "…"; the step count always stays whole.
+        val words = here.takeIf { back != null && it.isNotEmpty() }
+        val count = if (stepCount > 0) "$stepCount ${if (stepCount == 1) "step" else "steps"} ›" else null
+        if (words != null || count != null) Row((if (back != null) Modifier.weight(1f, fill = false) else Modifier).heightIn(min = 48.dp)
+            .clickable(enabled = stepCount > 0, role = Role.Button, onClickLabel = "History", onClick = onSteps).padding(start = 12.u).wrapCenter()) {
+            if (words != null) Text(words, style = ST.nav, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            if (count != null) Text(if (words != null) " · $count" else count, style = ST.nav, maxLines = 1)
+        }
     }
 }
 

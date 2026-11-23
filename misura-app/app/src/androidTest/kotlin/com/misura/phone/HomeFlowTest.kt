@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.hasSetTextAction
@@ -857,6 +858,14 @@ class HomeFlowTest {
         rule.onNodeWithText("Send").assertDoesNotExist()
         rule.onNodeWithText("Message to FriendA").performClick(); waitText("There in 5") // a tap on the line opens the task
         rule.onNodeWithText("Send").assertExists()
+    }
+
+    @Test fun homeLineClosesTheOpenTaskLikeTheGesture() {
+        messaging(Script(draft), mutableListOf()); ask("tell FriendA we'll be there in 5"); waitText("There in 5")
+        rule.onNodeWithText("‹ Home").assertHeightIsAtLeast(48.dp).performClick()
+        waitText("Message to FriendA") // back on Home: the draft is a line, not a card; nothing here can send
+        rule.onNodeWithText("Send").assertDoesNotExist()
+        rule.onNodeWithText("‹ Home").assertDoesNotExist()
     }
 
     private fun swipeTask(text: String, far: Boolean = true) {

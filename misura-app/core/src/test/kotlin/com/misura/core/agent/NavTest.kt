@@ -70,7 +70,7 @@ class NavTest {
         val session = s(places = Places(listOf("A", "B", "C")))
         val facts = mapOf("A" to PlaceFact("A", "Namsan"))
         backLabel(session, facts, Nav().open(Screen.Detail("A"))) shouldBe "3 places"
-        backLabel(session, facts, Nav()) shouldBe null
+        backLabel(session, facts, Nav()) shouldBe "Home"
         backLabel(session, facts, Nav().open(Screen.FullMap)) shouldBe "3 places"
         backLabel(session, facts, Nav().open(Screen.Detail("A")).open(Screen.FullMap)) shouldBe "Namsan"
         backLabel(s(), facts, Nav().open(Screen.History)) shouldBe "Back"

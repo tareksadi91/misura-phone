@@ -8,8 +8,11 @@ set -uo pipefail
 dir=${1:?Give an output directory outside the repo}; mkdir -p "$dir"; out=$dir/results.md
 a() { adb -s "$ANDROID_SERIAL" shell "$@"; }
 log() { a logcat -d -s MisuraAgent 2>/dev/null; }
-# turn: only this ask's lines (from its "user turn (N chars)"), so another session's tail can't count
-turn() { log | awk -v m="user turn ($qlen chars)" 'index($0, m) { p = 1 } p'; }
+# turn: only this ask's lines: from its "user turn (N chars)" on, dropping lines of any other session.
+# Hand lines ("use_app ...") carry no session id, so a hand running for another session at the same time still counts.
+turn() { log | awk -v m="user turn ($qlen chars)" '
+  !p && index($0, m) { p = 1; match($0, /session [0-9a-f-]+/); sid = substr($0, RSTART, RLENGTH) }
+  p && (index($0, sid) || $0 !~ /session [0-9a-f-]+ /)'; }
 fg() { a dumpsys activity activities | grep -m1 topResumedActivity | grep -o '[a-z0-9._]*/[A-Za-z0-9._$]*'; }
 screen() { a uiautomator dump /sdcard/m0.xml >/dev/null 2>&1; a cat /sdcard/m0.xml | grep -o 'text="[^"]*"' | grep -v 'text=""' | sed 's/text=//' | tr '\n' ' ' | cut -c1-600; }
 # Result alerts by tag (result:<session>), never content; the routine's working notice has another tag. Home clears old

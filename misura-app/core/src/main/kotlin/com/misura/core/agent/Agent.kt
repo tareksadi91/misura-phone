@@ -284,7 +284,33 @@ class Agent(
      * own words (Codex P1). The model finds the title, price and package for that id in the tool results already in its history.
      */
     fun openItem(sessionId: String, item: ItemFact): Job = enqueue(sessionId) {
-        turn(sessionId, userText("Open the item with id ${item.id} on my screen: call use_app with show = true and item = ${item.id}, in the app that item came from. Pass a short goal such as \"open it\"; the app adds the title and price itself.", PICK_NOTE))
+        val text = userText("Open the item with id ${item.id} on my screen: call use_app with show = true and item = ${item.id}, in the app that item came from. Pass a short goal such as \"open it\"; the app adds the title and price itself.", PICK_NOTE)
+        // The open runs in code (owner list item 4): no model call before or after it, each 2-14 s. Without the app or its package, the model does it.
+        val t = tools[USE_APP]; val pkg = item.pkg
+        if (t == null || pkg == null) turn(sessionId, text) else turn(sessionId, text) { id, turnNo -> openDirect(id, turnNo, t, pkg, item) }
+    }
+
+    /** A card tap's open, as its own step (Stop works as on any step). The model sees what happened as plain text: no made-up function call in its history. */
+    private suspend fun openDirect(id: String, turnNo: Int, t: Tool, pkg: String, item: ItemFact) {
+        val result = runStep(id, turnNo, t, buildJsonObject { put("app", pkg); put("goal", "open it"); put("show", true); put("item", item.id) })
+        fun said(line: String) = Turn("model", JsonObject(userText(line) + ("role" to JsonPrimitive("model"))))
+        // The model side says what the screen says, as the model itself used to answer a tap.
+        toolQuestion(result)?.let { q -> store.append(id, said(q.line)); setSay(id, q); idle(id); return }
+        val line = if (result["error"] != null) "Couldn't open it." else "Opened."
+        // Words said while it opened (the step took them): they join the thread as the user's, and the model answers them (Codex P2).
+        val words = withContext(NonCancellable) {
+            val w = queues[id]?.let { q -> synchronized(steering) { q.said.toList() } }.orEmpty()
+            store.append(id, said(line))
+            // What the step found while it worked comes along as the app's note (outside data, like a choice's), or the model would look again (Codex P2).
+            val found = ((result["result"] ?: result["error"]) as? JsonPrimitive)?.content?.take(400)
+            if (w.isNotEmpty()) appendSteering(id, w, buildJsonObject { put("role", "user"); put("parts", buildJsonArray {
+                add(buildJsonObject { put("text", w.joinToString(" ")) }); add(buildJsonObject { put("text", STEER_NOTE) })
+                found?.let { f -> add(buildJsonObject { put("text", "(the app, while opening it: $f)") }) }
+            }) })
+            w
+        }
+        if (words.isNotEmpty()) return loop(id, turnNumber(store.turns(id)))
+        if (result["error"] != null) fail(id, line) else { setSay(id, Say.Answer(line)); idle(id) }
     }
 
     /**
@@ -329,7 +355,7 @@ class Agent(
 
     private class TooManySteps : Exception()
 
-    private suspend fun turn(id: String, content: JsonObject) {
+    private suspend fun turn(id: String, content: JsonObject, direct: (suspend (String, Int) -> Unit)? = null) {
         if (queues[id]?.stopping == true) return
         store.load(id)?.let { store.save(it.copy(status = SessionStatus.THINKING, dismissedAt = null)) } ?: return
         store.append(id, Turn("user", content))
@@ -344,7 +370,7 @@ class Agent(
         }
         try {
             // The turn runs as its own job so the user's next words can stop it without stopping this session's queue.
-            coroutineScope { async { withTimeout(turnTimeoutMs) { withContext(turnContext().minusKey(Job)) { loop(id, turnNo) } } }.also { job -> queues[id]?.let { q -> q.turn = job; if (q.stopping) job.cancel() } }.await() }
+            coroutineScope { async { withTimeout(turnTimeoutMs) { withContext(turnContext().minusKey(Job)) { if (direct != null) direct(id, turnNo) else loop(id, turnNo) } } }.also { job -> queues[id]?.let { q -> q.turn = job; if (q.stopping) job.cancel() } }.await() }
         } catch (e: TimeoutCancellationException) {
             fail(id, "Misura took too long to answer.${status()}")
         } catch (e: CancellationException) {

@@ -39,7 +39,7 @@ class FollowUpTest {
 
     @Test fun retryReplaysTheNote() = runTest {
         val store = InMemorySessionStore()
-        val agent = Agent(store, ScriptedBrain(text("a"), { throw BrainError("x", code = "503") }, text("c")), emptyList(), { 0 }, this)
+        val agent = Agent(store, ScriptedBrain(text("a"), { throw BrainError("x", code = "400") }, text("c")), emptyList(), { 0 }, this)
         val id = agent.start("bibimbap"); advanceUntilIdle()
         agent.followUp(id, "is it open Friday?", lookingAt = namsan.looking()); advanceUntilIdle()
         agent.retry(id); advanceUntilIdle()
@@ -113,7 +113,7 @@ class FollowUpTest {
         val store = InMemorySessionStore(); val tool = Working(takes = true)
         // One reply works the app and answers in the same breath; the words arrive while the app step is still working.
         val both = Calls(listOf(Triple("use_app", JsonObject(emptyMap()), null), Triple("answer", kotlinx.serialization.json.buildJsonObject { put("line", kotlinx.serialization.json.JsonPrimitive("The red one costs 5.")) }, null)))
-        val brain = ScriptedBrain(both, { throw BrainError("x", code = "503") }, text("The blue one costs 7."))
+        val brain = ScriptedBrain(both, { throw BrainError("x", code = "400") }, text("The blue one costs 7."))
         val agent = Agent(store, brain, listOf(tool), { 0 }, this)
         val id = agent.start("price of the red one"); testScheduler.runCurrent()
         agent.followUp(id, "no, the blue one"); testScheduler.runCurrent()

@@ -1067,7 +1067,7 @@ class HomeFlowTest {
     }
 
     @Test fun problemTryAgainResends() {
-        home(Script({ throw BrainError("x", code = "503") }, text("Here you go")))
+        home(Script({ throw BrainError("x", code = "400") }, text("Here you go")))
         ask("best bibimbap"); waitText("Try again")
         rule.onNodeWithText("Try again").performClick()
         waitText("Here you go")
@@ -1082,7 +1082,7 @@ class HomeFlowTest {
     }
 
     @Test fun failedFollowUpShowsProblemOverDetail() {
-        home(Script(find, show, { throw BrainError("x", code = "503") }))
+        home(Script(find, show, { throw BrainError("x", code = "400") }))
         ask("best bibimbap"); waitText("PICK")
         rule.onNodeWithText("Namsan").performClick(); waitText("‹ 3 places")
         ask("is it open Friday?"); waitText("Try again")

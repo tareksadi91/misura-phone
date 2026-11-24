@@ -56,6 +56,16 @@ sealed interface BrainReply {
 /** [code] is what users and logs see (HTTP status, "network"…); [message] can echo the user's words, so it stays internal. */
 class BrainError(message: String, val auth: Boolean = false, val code: String = "error") : Exception(message)
 
+/** Worth one more try: the network dropped (the model's or the sign-in's, "google_oauth_network") or the provider had a 5xx. Sign-in and other 4xx answers are not blips. */
+val BrainError.blip get() = !auth && (code.endsWith("network") || (code.toIntOrNull() ?: 0) >= 500)
+
+/** Runs one model call, again after 1.5 s and 4 s while it [blip]s (as hosted-model clients do). Only for calls that have no
+ *  effect of their own: nothing has run when the call fails. A timeout is not a blip and is not repeated. */
+suspend fun <T> retryBlips(block: suspend () -> T): T {
+    for (wait in longArrayOf(1_500, 4_000)) try { return block() } catch (e: BrainError) { if (!e.blip) throw e; kotlinx.coroutines.delay(wait) }
+    return block()
+}
+
 /** Stands in for an app package on a step that worked on the web, not in an app: the step shows the search icon. */
 const val WEB = "web"
 /** Same, for a step that wrote to or took from Misura's own notes. */

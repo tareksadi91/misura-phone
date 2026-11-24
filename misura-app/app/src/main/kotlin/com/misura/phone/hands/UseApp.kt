@@ -3,6 +3,7 @@ package com.misura.phone.hands
 import com.misura.core.agent.Brain
 import com.misura.core.agent.RunningFor
 import com.misura.core.agent.BrainError
+import com.misura.core.agent.blip
 import com.misura.core.agent.ToolCall
 import com.misura.core.agent.BrainReply
 import com.misura.core.agent.Tool
@@ -547,7 +548,7 @@ class UseApp(
                         reply = withTimeoutOrNull((deadline - System.nanoTime()) / 1_000_000 + SAFETY_MS / 2) { brain.next(PROMPT, turns, actionsFor(stuck) + listOfNotNull(AREA.takeIf { near != null })) }
                         blip = null; break
                     } catch (e: BrainError) {
-                        if (e.auth || !(e.code == "network" || (e.code.toIntOrNull() ?: 0) >= 500)) throw e
+                        if (!e.blip) throw e
                         blip = e; if (attempt == 0) delay(1500)
                     }
                 }

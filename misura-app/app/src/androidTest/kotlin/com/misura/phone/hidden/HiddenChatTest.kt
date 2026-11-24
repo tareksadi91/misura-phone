@@ -1367,6 +1367,18 @@ class HiddenChatTest {
         check(told && after >= 2 && sheetAfter >= 1) { "told=$told after=$after sheetAfter=$sheetAfter" } // refused once, then the insisted tap opened the sheet and the run went on
     }
 
+    /** A sign-in wall is said as such and keeps what was found (owner list item 5): the main model can show it and offer to open the app. Red before: no needsLogin. */
+    @Test fun aSignInWallSaysSoAndKeepsWhatWasFound(): Unit = runBlocking {
+        val open = { t: String -> "tap" to args("i" to at(t, "Shop")) }
+        val r = mk(brainOf(open, { t -> "item" to args("i" to at(t, "Blue lamp"), "title" to "Blue lamp", "price" to "12 €") },
+            { _ -> "fail" to args("reason" to "the app wants a sign-in to show more", "login" to true) }), filesDir = ctx.filesDir).run(goal())
+        r["needsLogin"] shouldBe kotlinx.serialization.json.JsonPrimitive(true)
+        check(r["error"] != null) { r.toString() }
+        (r["items"] as kotlinx.serialization.json.JsonArray).size shouldBe 1
+        // A plain fail is not a sign-in wall.
+        mk(brainOf({ _ -> "fail" to args("reason" to "no such page") })).run(goal())["needsLogin"] shouldBe null
+    }
+
     /** A hand that gives up still hands back what it noted on the way (fail dropped the notes before 23 Nov; running out kept them). */
     @Test fun aFailingHandKeepsItsNotes(): Unit = runBlocking {
         val r = mk(brainOf({ _ -> "note" to args("text" to "Gym A is open till 22") }, { _ -> "fail" to args("reason" to "no such filter in this app") })).run(goal())

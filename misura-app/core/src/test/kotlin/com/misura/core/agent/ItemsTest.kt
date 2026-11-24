@@ -162,6 +162,17 @@ class ItemsTest {
         brain.seen.size shouldBe 4
         store.load(id)!!.say shouldBe Say.Answer("Opened.")
     }
+    // Owner list item 5: a sign-in wall after some finds. The model shows what was found and asks to open the app in one reply; both stay on screen.
+    @Test fun aSignInWallShowsTheFindsAndAsksToOpenTheApp() = runTest {
+        val wall = j("""{"error":"the app wants a sign-in","needsLogin":true,"items":[{"id":"i1","title":"Blue jacket"},{"id":"i2","title":"Boots"}],"itemsFrom":{"app":"Vinted","pkg":"fr.vinted"}}""")
+        val both = Calls(listOf(Triple("show_items", j("""{"itemIds":["i1","i2"],"pick":"i1","line":"Found two before the sign-in."}"""), null),
+            Triple("ask", j("""{"line":"Vinted wants you signed in. Open it?","choices":["Open Vinted to sign in","Not now"]}"""), null)))
+        val (store, agent) = run(ScriptedBrain(call("use_app"), both), FakeTool(useApp) { wall })
+        val id = agent.start("jackets on vinted"); advanceUntilIdle()
+        val s = store.load(id)!!
+        s.items shouldBe Items(listOf("i1", "i2"), "i1")
+        s.say.shouldBeInstanceOf<Say.Question>().choices shouldBe listOf("Open Vinted to sign in", "Not now")
+    }
     @Test fun aToolKnowsWhichSessionItRunsFor() = runTest {
         var seen: String? = null
         val tool = FakeTool(useApp) { seen = kotlin.coroutines.coroutineContext[RunningFor]?.session; j(found) }

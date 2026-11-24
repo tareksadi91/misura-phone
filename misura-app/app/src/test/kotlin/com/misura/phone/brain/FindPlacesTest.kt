@@ -1,6 +1,7 @@
 package com.misura.phone.brain
 
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -25,7 +26,8 @@ class FindPlacesTest {
         listOf("Izakaya Lisboa | Tokyo-style tavern | 19:00–01:00", "Lost In | terrace with a view | 12:30–00:00", "Faz Frio | classic Portuguese tavern | 12:00–01:00"),
         listOf("Izakaya Lisboa" to "ChIJa", "Lost In" to "ChIJb", "Faz Frio" to "ChIJc"))
 
-    private fun tool(http: TinyHttp) = FindPlaces({ "t" }, { "test-project" }, vertexBase = http.base, placesBase = http.base + "/v1")
+    private fun tool(http: TinyHttp, here: suspend () -> Pair<Double, Double>? = { null }) =
+        FindPlaces({ "t" }, { "test-project" }, vertexBase = http.base, placesBase = http.base + "/v1", here = here)
     private fun args(vararg kv: Pair<String, String>) = JsonObject(kv.associate { it.first to JsonPrimitive(it.second) })
     private fun JsonObject.places() = this["places"]!!.jsonArray.map { it.jsonObject }
     private fun JsonObject.s(k: String) = this[k]?.jsonPrimitive?.content
@@ -172,6 +174,52 @@ class FindPlacesTest {
             else -> details(52.5, 13.4)
         } }.use { http ->
             tool(http).run(args("query" to "bibimbap")).places()[1]["placeId"] shouldBe null
+        }
+    }
+
+    private val munich = 48.137 to 11.575
+    private val one = grounded(listOf("Prado | wine | 19:00"), emptyList())
+    private fun TinyHttp.groundingBody() = Json.parseToJsonElement(requests.first { it.path.contains("generateContent") }.body).jsonObject
+
+    @Test fun noNamedPlaceSearchesWhereThePhoneIs() = runBlocking<Unit> {
+        TinyHttp { r -> if (r.path.contains("generateContent")) one else 200 to """{"places":[]}""" }.use { http ->
+            val result = tool(http) { munich }.run(args("query" to "cafes"))
+            val latLng = http.groundingBody()["toolConfig"]!!.jsonObject["retrievalConfig"]!!.jsonObject["latLng"]!!.jsonObject
+            latLng.s("latitude") shouldBe "48.137"; latLng.s("longitude") shouldBe "11.575"
+            http.requests.first { it.path.endsWith("searchText") }.body shouldContain "\"locationBias\""
+            result.s("searchedNear") shouldBe "where the phone is now"
+            result.toString().contains("48.137") shouldBe false // coordinates stay out of the model's tool result
+        }
+    }
+
+    @Test fun aNamedPlaceWinsOverThePhone() = runBlocking<Unit> {
+        var asked = false
+        TinyHttp { r -> if (r.path.contains("generateContent")) one else 200 to """{"places":[]}""" }.use { http ->
+            val result = tool(http) { asked = true; munich }.run(args("query" to "cafes", "near" to "Kreuzberg, Berlin"))
+            asked shouldBe false
+            http.groundingBody()["toolConfig"] shouldBe null
+            (http.requests.first { it.path.endsWith("searchText") }.body.contains("locationBias")) shouldBe false
+            result.s("searchedNear") shouldBe "Kreuzberg, Berlin"
+        }
+    }
+
+    @Test fun hereInNearMeansThePhone() = runBlocking<Unit> {
+        TinyHttp { r -> if (r.path.contains("generateContent")) one else 200 to """{"places":[]}""" }.use { http ->
+            tool(http) { munich }.run(args("query" to "cafes", "near" to "me"))
+            http.groundingBody()["toolConfig"] shouldNotBe null
+        }
+        for (alias in listOf("near  me", "Around me", "near my location", "my current location", "right here")) {
+            TinyHttp { r -> if (r.path.contains("generateContent")) one else 200 to """{"places":[]}""" }.use { http ->
+                tool(http) { munich }.run(args("query" to "cafes", "near" to alias)).s("searchedNear") shouldBe "where the phone is now"
+            }
+        }
+    }
+
+    @Test fun unknownLocationIsSaid() = runBlocking<Unit> {
+        TinyHttp { r -> if (r.path.contains("generateContent")) one else 404 to "{}" }.use { http ->
+            val result = tool(http) { null }.run(args("query" to "cafes"))
+            http.groundingBody()["toolConfig"] shouldBe null
+            result.s("searchedNear")!! shouldContain "unknown"
         }
     }
 }

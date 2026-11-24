@@ -128,12 +128,12 @@ private val AREA = ToolSpec("area", "Say which city or area the app is searching
  * A near_user run: the phone's city is looked up next to the app launch, and the area the app searches is what the hand reads off the
  * screen. Never inferred from the phone's city (Codex audit 24 Nov). Every exit of such a run carries both.
  */
-internal class Near(private val city: kotlinx.coroutines.Deferred<String?>) {
+internal class Near(private val city: kotlinx.coroutines.Deferred<String?>, private val said: (Boolean) -> Unit = {}) {
     var area: String? = null
     var userIn: String? = null; private set
     private var asked = false
     suspend fun line(): String {
-        if (!asked) { asked = true; userIn = runCatching { city.await() }.getOrNull() }
+        if (!asked) { asked = true; userIn = runCatching { city.await() }.getOrNull(); said(userIn != null) }
         return userIn?.let { c -> "Near the user: they are in $c now. Before recording, find which city or area the app is searching (a location or city field, often at the top) and call area with its words. If it is another place, change it by typing $c into the app's own location or city search, not with a 'use my location' or 'near me' button (that asks for a permission nobody can answer here); then call area again. If it can't be changed, go on: the user is told which area the results are for." }
             ?: "Near the user: where the user is now is unknown. Find which city or area the app is searching and call area with its words; don't change it."
     }
@@ -321,7 +321,7 @@ class UseApp(
         // How many things to record (find or compare goals); a run that opens the app for the user has nothing to count.
         val count = if (show) null else (args["count"] as? JsonPrimitive)?.intOrNull?.takeIf { it > 0 }?.coerceAtMost(MAX_ITEMS)
         if (!ScreenReader.connected()) return err("accessibility is off")
-        val near = if ((args["near_user"] as? JsonPrimitive)?.booleanOrNull == true && thing == null) Near(scope.async { runCatching { whereNow() }.getOrNull() }) else null
+        val near = if ((args["near_user"] as? JsonPrimitive)?.booleanOrNull == true && thing == null) Near(scope.async { runCatching { whereNow() }.getOrNull() }) { known -> log("use_app $pkg: near_user city=${if (known) "known" else "unknown"}") } else null
         val heard = mutableListOf<String>().also { synchronized(lock) { added = it } }
         // The slot is taken under the lock, so two runs never share a screen. It is used only for the same app and, after a question, the same goal
         // (or, after things were recorded, a show run); anything else lets it go and starts fresh.

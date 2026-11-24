@@ -704,6 +704,11 @@ class UseApp(
                 }
                 /** Enter, where focus is now. */
                 suspend fun pressEnter(): Any {
+                    // A third Enter on a same-looking screen is not made, once, like a tap (25 Nov: a search box that only lists suggestions,
+                    // Enter pressed seven times at 10-15 s a model call). Made again after being told, it goes through.
+                    val ek = "${tapScreen(seen)}\u0000enter"
+                    val pressed = tappedAt[ek].orEmpty()
+                    if (pressed.size >= 2 && refused.add(ek)) { repeats++; return "not made: the third Enter on a same-looking screen (steps ${pressed.joinToString(" and ")}); it changed nothing. Tap a suggestion or a result instead, or call done or fail. Only if Enter really makes progress the screen doesn't show, press it again" }
                     // Enter can send what was typed (chat apps set to send on Enter, one-field forms): with words in a field that is
                     // not a search box it goes through the same gate as a Send tap. A search stays one step.
                     // The whole screen (a field past the model's 150 lines still counts), and the field that has focus: Enter goes there.
@@ -724,7 +729,7 @@ class UseApp(
                     // there before a yes is spent, so a yes for form A never presses Enter in form B.
                     if (focus != null && !focus.search && typed.isNotEmpty())
                         when (val g = gated("Enter", focus, "press Enter")) { null -> Unit; else -> return g }
-                    hidden.key(s, 66); return "pressed enter"
+                    hidden.key(s, 66); tappedAt[ek] = pressed + (did.size + 1); return "pressed enter"
                 }
                 // What the step line says right now, in plain words; nothing for done/fail (the step closes).
                 stepLine(c, el())?.let { note("$app: $it") }

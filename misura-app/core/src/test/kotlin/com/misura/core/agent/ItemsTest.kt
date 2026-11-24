@@ -104,7 +104,7 @@ class ItemsTest {
         thread(store.turns(id)) shouldBe listOf(Exchange(1, "jackets", "This jacket"))
     }
     @Test fun tappingACardOpensItAsATapNotAsTheUsersWords() = runTest {
-        val brain = ScriptedBrain(call("use_app"), showI1("This jacket"), text("Opened."))
+        val brain = ScriptedBrain(call("use_app"), showI1("This jacket"))
         val (store, agent) = run(brain, FakeTool(useApp) { j(found) })
         val id = agent.start("jackets"); advanceUntilIdle()
         agent.openItem(id, itemFacts(store.turns(id)).getValue("i1")); advanceUntilIdle()
@@ -114,6 +114,53 @@ class ItemsTest {
         tap.content.toString().contains("Blue jacket") shouldBe false   // outside text never goes into the turn
         // Not a new exchange: the tap carries the first one on and the answer lands on it.
         thread(store.turns(id)) shouldBe listOf(Exchange(1, "jackets", "Opened.", last = 2))
+    }
+    // Owner list item 4: a card tap opens the thing in code, no model call before or after (each 2-14 s on the phone). Red before: two more model calls.
+    @Test fun aCardTapOpensTheItemInCodeWithoutAModelCall() = runTest {
+        val brain = ScriptedBrain(call("use_app"), showI1("This jacket")) // a third model call would fail the turn
+        val asked = mutableListOf<JsonObject>()
+        val (store, agent) = run(brain, FakeTool(useApp) { a -> asked += a; j(found) })
+        val id = agent.start("jackets"); advanceUntilIdle()
+        agent.openItem(id, itemFacts(store.turns(id)).getValue("i1")); advanceUntilIdle()
+        brain.seen.size shouldBe 2
+        asked.size shouldBe 2
+        asked.last()["app"] shouldBe JsonPrimitive("fr.vinted"); asked.last()["item"] shouldBe JsonPrimitive("i1"); asked.last()["show"] shouldBe JsonPrimitive(true)
+        store.load(id)!!.say shouldBe Say.Answer("Opened.")
+        store.load(id)!!.status shouldBe SessionStatus.IDLE
+    }
+    @Test fun aCardOpenThatFailsShowsAProblemToTryAgain() = runTest {
+        var n = 0
+        val brain = ScriptedBrain(call("use_app"), showI1("This jacket"))
+        val (store, agent) = run(brain, FakeTool(useApp) { if (n++ == 0) j(found) else j("""{"error":"the app closed"}""") })
+        val id = agent.start("jackets"); advanceUntilIdle()
+        agent.openItem(id, itemFacts(store.turns(id)).getValue("i1")); advanceUntilIdle()
+        brain.seen.size shouldBe 2
+        store.load(id)!!.say shouldBe Say.Problem("Couldn't open it.")
+    }
+    @Test fun wordsSaidWhileACardOpensAreAnsweredByTheModel() = runTest {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var n = 0
+        val delegate = FakeTool(useApp) { if (n++ == 0) j(found) else { gate.await(); j("""{"result":"shown; shipping 4 €"}""") } }
+        val tool = object : Tool by delegate { override fun steer(text: String) = true }
+        val brain = ScriptedBrain(call("use_app"), showI1("This jacket"), text("Shipping is 4 €."))
+        val (store, agent) = run(brain, tool)
+        val id = agent.start("jackets"); advanceUntilIdle()
+        agent.openItem(id, itemFacts(store.turns(id)).getValue("i1")); testScheduler.runCurrent()
+        agent.followUp(id, "what is the shipping cost").join()
+        gate.complete(Unit); advanceUntilIdle()
+        brain.seen.size shouldBe 3 // the open itself took no model call; the words did
+        store.load(id)!!.say shouldBe Say.Answer("Shipping is 4 €.")
+        brain.seen.last().last().content.toString().contains("what is the shipping cost") shouldBe true
+        brain.seen.last().last().content.toString().contains("shipping 4 €") shouldBe true // what the step found reaches the model
+    }
+    @Test fun anItemWithoutItsAppIsOpenedByTheModel() = runTest {
+        val noApp = """{"items":[{"id":"i1","title":"Blue jacket"},{"id":"i2","title":"Boots"}]}"""
+        val brain = ScriptedBrain(call("use_app"), showI1("This jacket"), call("use_app"), text("Opened."))
+        val (store, agent) = run(brain, FakeTool(useApp) { j(noApp) })
+        val id = agent.start("jackets"); advanceUntilIdle()
+        agent.openItem(id, itemFacts(store.turns(id)).getValue("i1")); advanceUntilIdle()
+        brain.seen.size shouldBe 4
+        store.load(id)!!.say shouldBe Say.Answer("Opened.")
     }
     @Test fun aToolKnowsWhichSessionItRunsFor() = runTest {
         var seen: String? = null

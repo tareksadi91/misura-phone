@@ -23,6 +23,8 @@ sealed interface Draft {
 }
 
 const val DRAFT_MESSAGE = "draft_message"
+/** The app hand's tool name (registered by the phone app); a card tap runs it directly. */
+const val USE_APP = "use_app"
 
 private val GO = setOf("go", "send", "send it", "send them", "yes", "yes send", "yes send it", "yes send them")
 /**

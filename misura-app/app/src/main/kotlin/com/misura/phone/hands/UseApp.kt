@@ -29,6 +29,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -120,6 +121,25 @@ private val ACTIONS = listOf(
     ToolSpec("fail", "The goal can't be reached.", schema("reason" to "string", required = listOf("reason"))),
 )
 
+/** Offered only on near_user runs: which city or area the app searches, as its screen shows it. */
+private val AREA = ToolSpec("area", "Say which city or area the app is searching now, in the words its screen shows.", schema("text" to "string", required = listOf("text")))
+
+/**
+ * A near_user run: the phone's city is looked up next to the app launch, and the area the app searches is what the hand reads off the
+ * screen. Never inferred from the phone's city (Codex audit 24 Nov). Every exit of such a run carries both.
+ */
+internal class Near(private val city: kotlinx.coroutines.Deferred<String?>) {
+    var area: String? = null
+    var userIn: String? = null; private set
+    private var asked = false
+    suspend fun line(): String {
+        if (!asked) { asked = true; userIn = runCatching { city.await() }.getOrNull() }
+        return userIn?.let { c -> "Near the user: they are in $c now. Before recording, find which city or area the app is searching (a location or city field, often at the top) and call area with its words. If it is another place, change it by typing $c into the app's own location or city search, not with a 'use my location' or 'near me' button (that asks for a permission nobody can answer here); then call area again. If it can't be changed, go on: the user is told which area the results are for." }
+            ?: "Near the user: where the user is now is unknown. Find which city or area the app is searching and call area with its words; don't change it."
+    }
+    fun stamp(o: kotlinx.serialization.json.JsonObjectBuilder) { o.put("searchArea", area ?: "not read: the hand did not say which area the app searched"); o.put("userIn", userIn ?: "unknown") }
+}
+
 /** The tools for one round: a direction that moved nothing on this screen ([stuck]: true = up, false = down) is left out of scroll; both: no scroll at all. */
 internal fun actionsFor(stuck: Set<Boolean>): List<ToolSpec> = when (stuck.size) {
     0 -> ACTIONS
@@ -164,13 +184,15 @@ class UseApp(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     /** How long a screen stays parked: as long as the gate's yes lasts. */
     private val parkMs: Long = 5 * 60_000,
+    /** The city the phone is in now, for near_user runs only (null = unknown). Read only when a run asks for it. */
+    private val whereNow: suspend () -> String? = { null },
 ) : Tool {
     private val apps get() = appList()
     // A getter: an app installed while Misura runs is offered on the next call.
     override val spec get() = ToolSpec(
         "use_app",
-        "Do something in any installed Android app, in the background, by operating its screen: look things up, change settings, set alarms, create entries. app = the package name; goal = what to do or find out, in full. Stops and asks the user before a tap that sends, pays, books or deletes. count = how many things to record, for find or compare goals; the run ends by itself when that many are recorded. show = true only when the user wants to open or use the app themselves ('open it', 'take me there'): the app is left open on their screen at that page when you are done. item = the id of a found thing the user wants to open (with show = true): the app then adds its full title and price to the goal itself, so goal can be short. To let the user see things found (products, listings), leave show off: they come back as items and show_items shows them. One call at a time, never two in the same turn. Installed: " + apps.joinToString { "${it.first} = ${it.second}" }.ifEmpty { "ask by package name, e.g. com.google.android.deskclock" },
-        schema("app" to "string", "goal" to "string", "show" to "boolean", "count" to "integer", "item" to "string", required = listOf("app", "goal")),
+        "Do something in any installed Android app, in the background, by operating its screen: look things up, change settings, set alarms, create entries. app = the package name; goal = what to do or find out, in full. Stops and asks the user before a tap that sends, pays, books or deletes. count = how many things to record, for find or compare goals; the run ends by itself when that many are recorded. show = true only when the user wants to open or use the app themselves ('open it', 'take me there'): the app is left open on their screen at that page when you are done. item = the id of a found thing the user wants to open (with show = true): the app then adds its full title and price to the goal itself, so goal can be short. To let the user see things found (products, listings), leave show off: they come back as items and show_items shows them. near_user = true when the goal is about places near the user ('near me', 'in the area', 'nearby'): the result then says searchArea (the city or area the app searched, as the hand read it) and userIn (where the phone is now, or unknown); call the results near the user only when searchArea is the same place as userIn, otherwise say which area they are for. One call at a time, never two in the same turn. Installed: " + apps.joinToString { "${it.first} = ${it.second}" }.ifEmpty { "ask by package name, e.g. com.google.android.deskclock" },
+        schema("app" to "string", "goal" to "string", "show" to "boolean", "count" to "integer", "item" to "string", "near_user" to "boolean", required = listOf("app", "goal")),
     )
     private fun name(pkg: String?) = apps.firstOrNull { it.second == pkg }?.first ?: pkg?.substringAfterLast('.') ?: "an app"
     // A message sent through the app: the step names who it is for; the card under it carries the words (no line said twice).
@@ -299,6 +321,7 @@ class UseApp(
         // How many things to record (find or compare goals); a run that opens the app for the user has nothing to count.
         val count = if (show) null else (args["count"] as? JsonPrimitive)?.intOrNull?.takeIf { it > 0 }?.coerceAtMost(MAX_ITEMS)
         if (!ScreenReader.connected()) return err("accessibility is off")
+        val near = if ((args["near_user"] as? JsonPrimitive)?.booleanOrNull == true && thing == null) Near(scope.async { runCatching { whereNow() }.getOrNull() }) else null
         val heard = mutableListOf<String>().also { synchronized(lock) { added = it } }
         // The slot is taken under the lock, so two runs never share a screen. It is used only for the same app and, after a question, the same goal
         // (or, after things were recorded, a show run); anything else lets it go and starts fresh.
@@ -327,10 +350,11 @@ class UseApp(
             // ponytail: photos of shown items older than a week disappear from old threads; fine for now, keep them with their thread if it matters.
             File(filesDir, "items").listFiles()?.filter { it.lastModified() < System.currentTimeMillis() - WEEK_MS }?.forEach { it.delete() }
             // Whatever ends the run carries what it recorded.
-            fun out(o: JsonObject) = if (things.isEmpty()) o else buildJsonObject {
+            fun out(o: JsonObject) = if (things.isEmpty() && near == null) o else buildJsonObject {
                 o.forEach { (k, v) -> put(k, v) }
-                put("items", buildJsonArray { things.forEach { t -> add(buildJsonObject { put("id", t.id); put("title", t.title); t.price?.let { put("price", it) }; t.detail?.let { put("detail", it) }; t.photo?.let { put("photo", it) } }) } })
-                put("itemsFrom", buildJsonObject { put("app", app); put("pkg", pkg) })
+                near?.stamp(this)
+                if (things.isNotEmpty()) put("items", buildJsonArray { things.forEach { t -> add(buildJsonObject { put("id", t.id); put("title", t.title); t.price?.let { put("price", it) }; t.detail?.let { put("detail", it) }; t.photo?.let { put("photo", it) } }) } })
+                if (things.isNotEmpty()) put("itemsFrom", buildJsonObject { put("app", app); put("pkg", pkg) })
             }
             var confused = 0
             val deadline = System.nanoTime() + budgetMs * 1_000_000
@@ -509,7 +533,7 @@ class UseApp(
                 val screenMs = ms(t0); val nodes = look.root.count { true }
                 val words = synchronized(lock) { heard.toList() }
                 if (words.size > told) { told = words.size; note("$app: got it, adjusting") }
-                val user = handPrompt(goal, thing, count, words, did, things.isEmpty() && (modelRounds + 1) in NUDGE_ROUNDS, seen)
+                val user = handPrompt(goal, thing, count, words, did, things.isEmpty() && (modelRounds + 1) in NUDGE_ROUNDS, seen, near?.line())
                 if (late()) return gaveUp("took too long")
                 val t1 = System.nanoTime()
                 val turns = listOf(Turn("user", buildJsonObject { put("role", "user"); put("parts", buildJsonArray { add(buildJsonObject { put("text", user) }) }) }))
@@ -520,7 +544,7 @@ class UseApp(
                 // A network blip is tried once more after 1.5 s; sign-in and 4xx errors are not blips.
                 for (attempt in 0..1) {
                     try {
-                        reply = withTimeoutOrNull((deadline - System.nanoTime()) / 1_000_000 + SAFETY_MS / 2) { brain.next(PROMPT, turns, actionsFor(stuck)) }
+                        reply = withTimeoutOrNull((deadline - System.nanoTime()) / 1_000_000 + SAFETY_MS / 2) { brain.next(PROMPT, turns, actionsFor(stuck) + listOfNotNull(AREA.takeIf { near != null })) }
                         blip = null; break
                     } catch (e: BrainError) {
                         if (e.auth || !(e.code == "network" || (e.code.toIntOrNull() ?: 0) >= 500)) throw e
@@ -711,15 +735,16 @@ class UseApp(
                     "wait" -> { delay(1000); "waited" }
                     // ponytail: a note costs a whole round (~4 s); let tap/key carry one if research jobs get slow.
                     "note" -> c.args.str("text")?.take(400)?.let { found += it; "noted: $it" } ?: "nothing to note"
+                    "area" -> near?.let { n -> c.args.str("text")?.take(80)?.let { n.area = it; "area: $it" } } ?: "unknown tool area"
                     else -> "unknown tool ${c.name}"
                 }
-                log("use_app $pkg #${did.size + 1}: ${if (ACTIONS.any { it.name == c.name }) c.name else "unknown"} screen=${screenMs}ms model=${modelMs}ms act=${ms(t2)}ms nodes=$nodes lines=${seen.size}$tok$split recorded=${things.size}/${count ?: 0}") // never the arguments: typed text and found facts stay out of logs
+                log("use_app $pkg #${did.size + 1}: ${if (ACTIONS.any { it.name == c.name } || c.name == "area") c.name else "unknown"} screen=${screenMs}ms model=${modelMs}ms act=${ms(t2)}ms nodes=$nodes lines=${seen.size}$tok$split recorded=${things.size}/${count ?: 0}") // never the arguments: typed text and found facts stay out of logs
                 did += "${did.size + 1}. $note"
                 if (batched && queue.isNotEmpty() && STEP_OK.none { note.startsWith(it) }) stopSteps("step $stepNo did not go through")
                 if (c.name == "item") enough(words.size)?.let { return it }
                 backed = c.name == "key" && c.args.str("name") == "back"
                 // A round that only recorded or noted leaves the screen as it was: no pause (unless it scrolled a cut-off one into view).
-                if (!((c.name == "item" || c.name == "note") && !scrolledOne)) delay(SETTLE_MS)
+                if (!((c.name == "item" || c.name == "note" || c.name == "area") && !scrolledOne)) delay(SETTLE_MS)
             }
             // Out of steps, not out of time. Repeated taps are named only when they happened (a long, productive run doesn't claim circles).
             return gaveUp("didn't finish in $maxActions steps" + if (repeats >= 2) ": kept repeating the same taps ($repeats repeats)" else "")
@@ -790,8 +815,8 @@ class UseApp(
     }
 
     /** One round's text for the hand's model: the goal, the thing to open, the count, the user's words, what was done, the nudge and the screen. */
-    private fun handPrompt(goal: String, thing: Pair<String, String?>?, count: Int?, words: List<String>, did: List<String>, nudge: Boolean, seen: List<Seen>) =
-        "Goal: $goal\n" + thingBlock(thing) + (if (count == null) "" else "Record $count thing${if (count == 1) "" else "s"}, then you are done.\n") + (if (words.isEmpty()) "" else "The user added while you worked (newest last):\n${words.joinToString("\n") { "- $it" }}\n") + "Done so far:\n${did.joinToString("\n").ifEmpty { "(nothing yet)" }}\n" + (if (nudge) "$NUDGE\n" else "") + "Screen:\n${seen.joinToString("\n") { it.line }}"
+    private fun handPrompt(goal: String, thing: Pair<String, String?>?, count: Int?, words: List<String>, did: List<String>, nudge: Boolean, seen: List<Seen>, near: String? = null) =
+        "Goal: $goal\n" + (near?.let { "$it\n" } ?: "") + thingBlock(thing) + (if (count == null) "" else "Record $count thing${if (count == 1) "" else "s"}, then you are done.\n") + (if (words.isEmpty()) "" else "The user added while you worked (newest last):\n${words.joinToString("\n") { "- $it" }}\n") + "Done so far:\n${did.joinToString("\n").ifEmpty { "(nothing yet)" }}\n" + (if (nudge) "$NUDGE\n" else "") + "Screen:\n${seen.joinToString("\n") { it.line }}"
 
     /**
      * Right before a queued type writes (by position): the same field must still be there, and without a label still the focused search box,

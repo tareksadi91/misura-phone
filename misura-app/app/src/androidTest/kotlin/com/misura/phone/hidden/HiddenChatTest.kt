@@ -73,9 +73,9 @@ class HiddenChatTest {
 
     // Every hand a test makes is let go of at the end: a screen parked after things were found must not outlive its test.
     private val hands = mutableListOf<com.misura.phone.hands.UseApp>()
-    private fun mk(brain: com.misura.core.agent.Brain, maxActions: Int = 25, budgetMs: Long = 150_000, filesDir: java.io.File? = null, log: (String) -> Unit = {}, parkMs: Long = 5 * 60_000) =
+    private fun mk(brain: com.misura.core.agent.Brain, maxActions: Int = 25, budgetMs: Long = 150_000, filesDir: java.io.File? = null, log: (String) -> Unit = {}, parkMs: Long = 5 * 60_000, whereNow: suspend () -> String? = { null }) =
         // The app is one task: an earlier test hand's parked screen would still hold it, so a new hand starts after those are let go (the app has one hand).
-        runBlocking { hands.forEach { it.releaseParked() } }.let { com.misura.phone.hands.UseApp(screen, brain, maxActions = maxActions, budgetMs = budgetMs, filesDir = filesDir, log = log, parkMs = parkMs).also { hands += it } }
+        runBlocking { hands.forEach { it.releaseParked() } }.let { com.misura.phone.hands.UseApp(screen, brain, maxActions = maxActions, budgetMs = budgetMs, filesDir = filesDir, log = log, parkMs = parkMs, whereNow = whereNow).also { hands += it } }
 
     @After fun tearDown(): Unit = runBlocking { hands.forEach { runCatching { it.releaseParked() } }; opened.forEach { runCatching { screen.close(it) } } }
 
@@ -1323,6 +1323,51 @@ class HiddenChatTest {
         check(r["error"] == null) { r.toString() }
         check(prompts.size == 10) { prompts.joinToString("\n---\n") }
         check(prompts.none { REPEAT_HINT in it }) { prompts.first { REPEAT_HINT in it } }
+    }
+
+    /**
+     * "Gyms in the area" in an app stuck on another city (sports-club app, 24 Nov: Berlin venues from Munich, called "in the area").
+     * A near_user run tells the hand the phone's city, the hand switches the app's city by typing it and says the area it read; the
+     * result carries both, also when the count ends the run without a done (Codex audit P1). Red before: no near_user, no searchArea.
+     */
+    @Test fun aNearUserRunSwitchesTheCityAndSaysTheArea(): Unit = runBlocking {
+        val prompts = mutableListOf<String>()
+        var typed = false
+        val brain = brainOf({ t ->
+            prompts += t
+            when {
+                "TestChat" in t -> "tap" to args("i" to at(t, "Venues"))
+                "Venues in Berlin" in t && !typed -> { typed = true; "type" to args("i" to at(t, "Berlin"), "text" to "Munich") }
+                "Venues in Munich" in t && "area: Munich" !in t -> "area" to args("text" to "Munich")
+                else -> "item" to args("i" to at(t, "Venues in Munich"), "title" to "Venues in Munich")
+            }
+        })
+        val r = mk(brain, maxActions = 8, filesDir = ctx.filesDir, whereNow = { "Munich" }).run(goal("near_user" to true, "count" to 1))
+        check(r["error"] == null) { "$r\n${prompts.lastOrNull()}" }
+        check(prompts.all { "they are in Munich now" in it }) { prompts.first() }
+        (r["searchArea"] as kotlinx.serialization.json.JsonPrimitive).content shouldBe "Munich"
+        (r["userIn"] as kotlinx.serialization.json.JsonPrimitive).content shouldBe "Munich"
+        check(r["items"] != null) { r.toString() } // ended by the count, not by done
+    }
+
+    /** Location unknown: the hand reads the app's area and leaves it; the result says the area and that where the user is is unknown. */
+    @Test fun aNearUserRunWithoutLocationSaysTheAppsArea(): Unit = runBlocking {
+        val prompts = mutableListOf<String>()
+        val brain = brainOf({ t -> prompts += t; "tap" to args("i" to at(t, "Venues")) }, { t -> prompts += t; "area" to args("text" to "Berlin") }, { _ -> "done" to args("result" to "venues") })
+        val r = mk(brain, maxActions = 5, whereNow = { null }).run(goal("near_user" to true))
+        check(r["error"] == null) { r.toString() }
+        check("where the user is now is unknown" in prompts.first()) { prompts.first() }
+        (r["searchArea"] as kotlinx.serialization.json.JsonPrimitive).content shouldBe "Berlin"
+        (r["userIn"] as kotlinx.serialization.json.JsonPrimitive).content shouldBe "unknown"
+    }
+
+    /** Not about places near the user: no city is looked up or shown, and the result has no area. */
+    @Test fun aRunNotNearTheUserReadsNoCity(): Unit = runBlocking {
+        var asked = false; val prompts = mutableListOf<String>()
+        val r = mk(brainOf({ t -> prompts += t; "done" to args("result" to "ok") }), maxActions = 3, whereNow = { asked = true; "Munich" }).run(goal())
+        check(r["error"] == null) { r.toString() }
+        asked shouldBe false
+        check(r["searchArea"] == null && prompts.none { "Near the user" in it }) { r.toString() }
     }
 
     companion object {

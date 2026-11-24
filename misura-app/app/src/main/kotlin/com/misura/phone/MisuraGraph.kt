@@ -89,7 +89,8 @@ object MisuraGraph {
         val routes = ModelRoutes(credentials::route)
         val places = RouteTool(FindPlaces(TokenProvider { null }, { "" })) { ctx -> FindPlaces(ctx.google.tokens, { ctx.google.project }, here = { com.misura.phone.brain.PhoneLocation.now(app) }) }
         val lookup = RouteTool(LookUp(TokenProvider { null }, { "" }), ::LookUp)
-        val useApp = com.misura.phone.hands.UseApp(hidden, ConfiguredHandBrain, { apps }, log = { if (BuildConfig.DEBUG || BuildConfig.DIAGNOSTICS) android.util.Log.i("MisuraAgent", it) }, filesDir = app.filesDir, scope = scope)
+        val useApp = com.misura.phone.hands.UseApp(hidden, ConfiguredHandBrain, { apps }, log = { if (BuildConfig.DEBUG || BuildConfig.DIAGNOSTICS) android.util.Log.i("MisuraAgent", it) }, filesDir = app.filesDir, scope = scope,
+            whereNow = { com.misura.phone.brain.PhoneLocation.now(app)?.let { com.misura.phone.brain.PhoneLocation.city(app, it) } })
         parkedApp = useApp::beforeHiddenOpen; bringParked = useApp::bringParked
         ScreenReader.userOpened = useApp::appOpened
         val calendar = com.misura.phone.hands.Calendar(app)

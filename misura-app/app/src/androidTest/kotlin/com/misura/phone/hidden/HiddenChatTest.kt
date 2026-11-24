@@ -1363,10 +1363,17 @@ class HiddenChatTest {
 
     /** Not about places near the user: no city is looked up or shown, and the result has no area. */
     @Test fun aRunNotNearTheUserReadsNoCity(): Unit = runBlocking {
-        var asked = false; val prompts = mutableListOf<String>()
-        val r = mk(brainOf({ t -> prompts += t; "done" to args("result" to "ok") }), maxActions = 3, whereNow = { asked = true; "Munich" }).run(goal())
+        var asked = false; val prompts = mutableListOf<String>(); val offered = mutableListOf<String>()
+        val brain = object : com.misura.core.agent.Brain {
+            override suspend fun next(system: String, turns: List<com.misura.core.agent.Turn>, tools: List<com.misura.core.agent.ToolSpec>): com.misura.core.agent.BrainReply {
+                prompts += turns.last().content.toString(); offered += tools.map { it.name }
+                return com.misura.core.agent.BrainReply.Calls(kotlinx.serialization.json.buildJsonObject {}, listOf(com.misura.core.agent.ToolCall(null, "done", args("result" to "ok"))))
+            }
+        }
+        val r = mk(brain, maxActions = 3, whereNow = { asked = true; "Munich" }).run(goal())
         check(r["error"] == null) { r.toString() }
         asked shouldBe false
+        check(offered.isNotEmpty() && "area" !in offered) { offered.toString() }
         check(r["searchArea"] == null && prompts.none { "Near the user" in it }) { r.toString() }
     }
 

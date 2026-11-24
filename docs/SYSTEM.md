@@ -147,6 +147,15 @@ This is the ordered to-do list for the sprint; it overrides the ordering below w
 
 ### Current shared backlog and ownership — 21 Nov 2026
 
+**App finds near the user (owner, 24 Nov; plan from Codex Sol + Astra on the hand's recorded screens; general only, never per-app code or prompts):**
+- [ ] 1. Sign-in renewal blip: `ServiceAccountToken` marks an `IOException` as auth (`google_oauth_network`, `auth=true`), so the hand never retries it and the token layer refuses for 30 s. Treat transport failures as network, one bounded retry, keep the cached token; never replay app actions.
+- [ ] 2. Keep the whole request and use the app's own words: the main prompt stops stripping conditions; the hand checks the app's categories/filters before a keyword search, maps the user's words to labels it sees, confirms the filter took, and leaves eligibility it can't see as unverified. Replace the "record now" nudges.
+- [ ] 3. Look further before picking: sort by distance when offered (verified); otherwise collect up to 10 candidates over 3 screens and keep the nearest, labelled "nearest among those checked". Separate the collection budget from the card count (today the count ends the run). Distance/condition fields read off the screen, not model text.
+- [ ] 4. Card tap opens in code: dispatch `use_app(item, show=true)` directly (no main-model turns), "Opening…" with Stop, Retry on failure.
+- [ ] 5. Login wall: typed `needs_login`, partial results kept, "Sign in" opens the app, Continue rechecks area/filters.
+- [ ] 6. Later: per-app learned routes, only after two independently checked successes; no personal data, keyed by package/version/locale, 30-day expiry, per-app reset, encrypted or not stored. Only after 2-3 (else it learns bad searches).
+- [ ] 7. Later: map + next actions on app cards (stay in Misura to look/compare; open the app for app-only actions; check-in through approval). Mockup first; venue-to-pin matching must be unambiguous.
+
 **BYOK regression repair — Codex, 21 Nov:** Reopened after live failures. The agent called the progress-callback overload of a routed tool, which Kotlin delegated to its credential-free prototype. This skipped saved Exa credentials and made Places report missing Google sign-in. Both overloads now dispatch through the captured route. Existing offline adapter tests had bypassed this integration boundary.
 
 - [x] Reproduce and repair actual Agent → RouteTool → Exa/Places dispatch; preserve captured account/project and progress callback. Add regressions through the agent to sourced-answer and place-card state.

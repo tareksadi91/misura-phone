@@ -163,6 +163,7 @@ class ChatActivity : Activity() {
     private fun showVenues() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 96, 32, 32) }
         col.addView(TextView(this).apply { text = "Venues"; textSize = 22f })
+        col.addView(TextView(this).apply { text = "Show gyms"; textSize = 14f; setOnClickListener { showGyms() } }) // small, high: the page has no scroll
         // The city it searches, like a sports-club app stuck on the account's city: typing another one moves the list there.
         val where = TextView(this).apply { text = "Venues in $city"; textSize = 16f }
         col.addView(android.widget.EditText(this).apply { setText(city); hint = "City"; textSize = 16f; addTextChangedListener(object : android.text.TextWatcher {
@@ -220,6 +221,28 @@ class ChatActivity : Activity() {
         setContentView(col)
     }
 
+    /**
+     * A nearby list the way a sports-club app shows it: photo tiles with a distance, in the app's own order (not by distance), over about
+     * four screens. The nearest one is on the second screen, one tile says two distances (which one is the user's is unknowable), one none.
+     */
+    private fun showGyms() {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 96, 32, 32) }
+        val d = resources.displayMetrics.density
+        col.addView(TextView(this).apply { text = "Gyms"; textSize = 22f; setPadding(0, 0, 0, 48) })
+        GYMS.forEachIndexed { k, (name, where) ->
+            col.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(ImageView(context).apply { setBackgroundColor((0xFF224466 + k * 0x101010).toInt()); importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES }, LinearLayout.LayoutParams(MATCH_PARENT, (140 * d).toInt()))
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL; isClickable = true
+                    addView(TextView(context).apply { text = name; textSize = 16f }); addView(TextView(context).apply { text = where; textSize = 14f })
+                })
+            }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = (24 * d).toInt() })
+        }
+        onEnter = null; flip = null; swap = null
+        setContentView(ScrollView(this).apply { addView(col) })
+    }
+
     private fun showTall(twin: Boolean) {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 96, 32, 32) }
         val d = resources.displayMetrics.density
@@ -260,7 +283,13 @@ class ChatActivity : Activity() {
         setContentView(col)
     }
 
-    companion object { @Volatile var current: ChatActivity? = null; fun flipNow(rows: Boolean = false) { current?.let { a -> a.runOnUiThread { (if (rows) a.swap else a.flip)?.invoke() } } } }
+    companion object {
+        /** Gyms page tiles, in the app's order. Nearest of the first screens is Gym Hall (400 m, fifth); Gym Twin says two distances; Gym Blank none; Gym Last (0.2 km) is past where a capped run looks. */
+        val GYMS = listOf("Gym North" to "Fitness · 2.6 km", "Gym Park" to "Fitness · 1.8 km", "Gym Twin" to "Fitness · 1.2 km · 3 km to centre",
+            "Gym River" to "Fitness · 3.4 km", "Gym Hall" to "Fitness · 400 m", "Gym Blank" to "Fitness", "Gym East" to "Fitness · 2,1 km",
+            "Gym Tower" to "Fitness · 4.4 km", "Gym West" to "Fitness · 0.9 km", "Gym South" to "Fitness · 5 km", "Gym Lake" to "Fitness · 6.2 km",
+            "Gym Hill" to "Fitness · 0.6 km", "Gym Far" to "Fitness · 7 km", "Gym Last" to "Fitness · 0.2 km")
+        @Volatile var current: ChatActivity? = null; fun flipNow(rows: Boolean = false) { current?.let { a -> a.runOnUiThread { (if (rows) a.swap else a.flip)?.invoke() } } } }
 
     private fun showChat(name: String) {
         onEnter = null; flip = null

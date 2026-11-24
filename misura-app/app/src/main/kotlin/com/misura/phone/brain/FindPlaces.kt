@@ -13,6 +13,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
@@ -65,7 +66,7 @@ class FindPlaces(
         val token = tokens.token() ?: throw BrainError("no sign-in token", auth = true)
         val query = (args["query"] as? JsonPrimitive)?.content ?: return buildJsonObject { put("error", "query is required") }
         // A place the user named wins; "here"/"me" or no place means where the phone is now (SYSTEM §3 Location).
-        val near = (args["near"] as? JsonPrimitive)?.content?.trim()?.takeUnless { it.isEmpty() || it.lowercase().removePrefix("my ") in HERE_WORDS }
+        val near = (args["near"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeUnless { it.isEmpty() || isHere(it) }
         val at = if (near == null) here() else null
         val day = (args["day"] as? JsonPrimitive)?.content ?: LocalDate.now().dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
         val places = grounded(token, project, query, near, at, day)
@@ -156,7 +157,9 @@ class FindPlaces(
 
     private companion object {
         /** Index + 1 = the €-count we show; FREE and UNSPECIFIED show no price. */
-        val HERE_WORDS = setOf("here", "me", "near me", "around here", "nearby", "current location", "location", "where i am")
+        val HERE_WORDS = setOf("here", "right here", "me", "nearby", "location", "current location", "my location", "my current location", "where i am")
+        /** "near  me", "Around me", "near my location"… all mean the phone, not a place called that. */
+        fun isHere(near: String) = near.lowercase().split(Regex("\\s+")).joinToString(" ").removePrefix("near ").removePrefix("around ") in HERE_WORDS
         val PRICE_LEVELS = listOf("PRICE_LEVEL_INEXPENSIVE", "PRICE_LEVEL_MODERATE", "PRICE_LEVEL_EXPENSIVE", "PRICE_LEVEL_VERY_EXPENSIVE")
     }
 }

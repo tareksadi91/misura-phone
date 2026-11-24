@@ -26,19 +26,23 @@ object PhoneLocation {
         if (!allowed(Manifest.permission.ACCESS_COARSE_LOCATION) && !allowed(Manifest.permission.ACCESS_FINE_LOCATION)) return null
         val lm = ctx.getSystemService(LocationManager::class.java) ?: return null
         if (!lm.isLocationEnabled) return null
-        val provider = listOf(LocationManager.FUSED_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
-            .firstOrNull { it in lm.getProviders(true) } ?: return null
+        val providers = lm.getProviders(true)
+        if (providers.isEmpty()) return null
         val fix = try {
-            withTimeoutOrNull(WAIT_MS) {
-                suspendCancellableCoroutine<Location?> { c ->
-                    val cancel = CancellationSignal()
-                    c.invokeOnCancellation { cancel.cancel() }
-                    lm.getCurrentLocation(provider, cancel, ctx.mainExecutor) { c.resume(it) }
+            // A fresh cached fix from any provider first (no wait); else ask the best provider once, within WAIT_MS.
+            providers.mapNotNull { lm.getLastKnownLocation(it) }.filter { fresh(age(it)) }.maxByOrNull { it.elapsedRealtimeNanos }
+                ?: withTimeoutOrNull(WAIT_MS) {
+                    val best = listOf(LocationManager.FUSED_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER).firstOrNull { it in providers } ?: providers.first()
+                    suspendCancellableCoroutine<Location?> { c ->
+                        val cancel = CancellationSignal()
+                        c.invokeOnCancellation { cancel.cancel() }
+                        lm.getCurrentLocation(best, cancel, ctx.mainExecutor) { c.resume(it) }
+                    }
                 }
-            } ?: lm.getLastKnownLocation(provider)
         } catch (_: SecurityException) { null } // permission withdrawn mid-read
-        return fix?.takeIf { fresh(SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos) }?.let { it.latitude to it.longitude }
+        return fix?.takeIf { fresh(age(it)) }?.let { it.latitude to it.longitude }
     }
 
+    private fun age(l: Location) = SystemClock.elapsedRealtimeNanos() - l.elapsedRealtimeNanos
     internal fun fresh(ageNanos: Long) = ageNanos in 0..MAX_AGE_MS * 1_000_000
 }

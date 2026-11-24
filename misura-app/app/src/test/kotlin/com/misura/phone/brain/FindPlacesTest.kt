@@ -208,6 +208,11 @@ class FindPlacesTest {
             tool(http) { munich }.run(args("query" to "cafes", "near" to "me"))
             http.groundingBody()["toolConfig"] shouldNotBe null
         }
+        for (alias in listOf("near  me", "Around me", "near my location", "my current location", "right here")) {
+            TinyHttp { r -> if (r.path.contains("generateContent")) one else 200 to """{"places":[]}""" }.use { http ->
+                tool(http) { munich }.run(args("query" to "cafes", "near" to alias)).s("searchedNear") shouldBe "where the phone is now"
+            }
+        }
     }
 
     @Test fun unknownLocationIsSaid() = runBlocking<Unit> {

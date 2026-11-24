@@ -3,6 +3,12 @@ package com.misura.phone.brain
 import io.kotest.matchers.shouldBe
 import io.kotest.assertions.throwables.shouldThrow
 import com.misura.core.agent.BrainError
+import com.misura.core.agent.BrainReply
+import com.misura.core.agent.Turn
+import com.misura.core.agent.blip
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import org.junit.Test
 import java.net.URLDecoder
 import java.security.KeyPairGenerator
@@ -37,8 +43,20 @@ class ServiceAccountTokenTest {
             .code shouldBe "google_credentials_invalid"
         val closed = TinyHttp { 200 to "{}" }
         closed.close()
-        shouldThrow<BrainError> { ServiceAccountToken({ keyJson("ignored") }, { null }, tokenUrl = closed.base).token() }
-            .code shouldBe "google_oauth_network"
+        val blip = shouldThrow<BrainError> { ServiceAccountToken({ keyJson("ignored") }, { null }, tokenUrl = closed.base).token() }
+        blip.code shouldBe "google_oauth_network"
+        blip.auth shouldBe false // a dropped connection is not a sign-in problem: the hand retries network errors, never auth ones
+    }
+
+    @Test fun aDroppedConnectionIsRetriedOnTheNextCallWithoutTheCooldown() {
+        var up = false
+        // Exchanges die without an answer (the socket closes) until the network is back; the next call, right after, succeeds.
+        TinyHttp { if (!up) throw IllegalStateException("drop") else 200 to """{"access_token":"tok","expires_in":3600}""" }.use { http ->
+            val t = ServiceAccountToken({ keyJson("x") }, { null }, { 0L }, http.base)
+            shouldThrow<BrainError> { t.token() }.code shouldBe "google_oauth_network"
+            up = true
+            t.token() shouldBe "tok" // same instant: no 30 s refusal after a blip
+        }
     }
 
     @Test fun malformedSuccessDoesNotBecomeCredentialRejectionOrExposeTokenBody() {
@@ -79,6 +97,37 @@ class ServiceAccountTokenTest {
             up = true; now += 31_000; t.token() shouldBe "tok"
             up = false; now += 57 * 60_000; t.token() shouldBe "tok"          // renewal failed, but the token has 3 minutes left
             now += 4 * 60_000; shouldThrow<BrainError> { t.token() }          // now it is really out
+        }
+    }
+
+    @Test fun aDroppedRenewalKeepsTheOldTokenAndWaitsOnlyWhileItWorks() {
+        var now = 0L; var up = true
+        TinyHttp { if (up) 200 to """{"access_token":"tok","expires_in":3600}""" else throw IllegalStateException("drop") }.use { http ->
+            val t = ServiceAccountToken({ keyJson("x") }, { null }, { now }, http.base)
+            t.token() shouldBe "tok"
+            up = false; now += 56 * 60_000
+            t.token() shouldBe "tok"; val asked = http.requests.size
+            now += 10_000; t.token() shouldBe "tok"; http.requests.size shouldBe asked // still covered: no exchange per call during an outage
+            now += 4 * 60_000                                                          // the old token is out
+            shouldThrow<BrainError> { t.token() }.code shouldBe "google_oauth_network"
+            up = true; t.token() shouldBe "tok"                                        // same instant: asked again, no 30 s wait
+        }
+    }
+
+    // Route: the model call the hand makes. A sign-in renewal that loses its connection must surface as a blip (the hand's
+    // retry rule), and the retry must reach Google and then the model, not a 30 s refusal. Never replays an app action: only the model call.
+    @Test fun aSignInBlipDuringAModelCallIsRetryableAndTheRetryReachesTheModel() = runBlocking<Unit> {
+        var up = false
+        TinyHttp { r -> when {
+            r.path == "/token" && !up -> throw IllegalStateException("drop")
+            r.path == "/token" -> 200 to """{"access_token":"tok","expires_in":3600}"""
+            else -> 200 to """{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}]}"""
+        } }.use { http ->
+            val brain = VertexBrain(ServiceAccountToken({ keyJson("x") }, { null }, { 0L }, http.base + "/token"), { "p" }, baseUrl = http.base)
+            val turn = Turn("user", Json.parseToJsonElement("""{"role":"user","parts":[{"text":"hi"}]}""").jsonObject)
+            shouldThrow<BrainError> { brain.next("S", listOf(turn), emptyList()) }.blip shouldBe true
+            up = true
+            (brain.next("S", listOf(turn), emptyList()) as BrainReply.Text).text shouldBe "ok"
         }
     }
 }

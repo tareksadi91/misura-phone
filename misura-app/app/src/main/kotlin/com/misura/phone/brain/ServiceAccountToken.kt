@@ -19,6 +19,7 @@ import java.util.Base64
  * one-hour token expired. No key on the phone = [fallback] (the token pushed over adb), as before.
  */
 private const val RETRY_MS = 30_000L
+private const val NETWORK = "google_oauth_network"
 
 // ponytail: the token call blocks the calling thread for a few hundred ms about once an hour; fine off the main thread, where every caller is.
 class ServiceAccountToken(
@@ -40,20 +41,25 @@ class ServiceAccountToken(
         if (k != forKey) { token = null; failure = null; forKey = k; failedAt = Long.MIN_VALUE / 2 } // another key was put on the phone
         val now = clock()
         token?.takeIf { now < goodUntil }?.let { return it }
-        // After a failure, wait before asking again: a revoked key must not turn every model call into another failed exchange.
-        val fresh = if (now - failedAt < RETRY_MS) null else try {
+        // After a rejection, wait before asking again: a revoked key must not turn every model call into another failed exchange.
+        // After a dropped connection, wait only while the old token still works; once it is out, the next call asks at once.
+        val usable = token?.takeIf { now < expiresAt }
+        val coolingDown = now - failedAt < RETRY_MS && (failure?.code != NETWORK || usable != null)
+        val fresh = if (coolingDown) null else try {
             fetch(k).also { failure = null }
         } catch (e: Exception) {
-            failedAt = now
             failure = when (e) {
                 is BrainError -> e
-                is IOException -> tokenError("google_oauth_network")
+                // A dropped connection is a network blip, not a sign-in problem: no cooldown, and callers that retry network
+                // errors (the hand, once after 1.5 s) reach Google again instead of hitting a 30 s refusal.
+                is IOException -> BrainError("Google sign-in unreachable", code = NETWORK)
                 else -> tokenError("google_credentials_invalid")
             }
+            failedAt = now
             null
         }
         // A token in its last five minutes is still a token: keep it when the early renewal failed. Then the pushed one; then "no sign-in".
-        return fresh ?: token?.takeIf { now < expiresAt } ?: fallback.token() ?: throw requireNotNull(failure)
+        return fresh ?: usable ?: fallback.token() ?: throw requireNotNull(failure)
     }
 
     private fun fetch(keyJson: String): String {

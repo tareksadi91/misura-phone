@@ -56,6 +56,9 @@ sealed interface BrainReply {
 /** [code] is what users and logs see (HTTP status, "network"…); [message] can echo the user's words, so it stays internal. */
 class BrainError(message: String, val auth: Boolean = false, val code: String = "error") : Exception(message)
 
+/** Worth one more try: the network dropped (the model's or the sign-in's, "google_oauth_network") or the provider had a 5xx. Sign-in and other 4xx answers are not blips. */
+val BrainError.blip get() = !auth && (code.endsWith("network") || (code.toIntOrNull() ?: 0) >= 500)
+
 /** Stands in for an app package on a step that worked on the web, not in an app: the step shows the search icon. */
 const val WEB = "web"
 /** Same, for a step that wrote to or took from Misura's own notes. */

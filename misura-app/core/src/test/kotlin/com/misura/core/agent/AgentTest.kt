@@ -176,7 +176,7 @@ class AgentTest {
     }
 
     @Test fun retryResendsLastUserText() = runTest {
-        val brain = ScriptedBrain({ throw BrainError("x", code = "503") }, text("worked"))
+        val brain = ScriptedBrain({ throw BrainError("x", code = "400") }, text("worked")) // not a blip: blips are retried on their own
         val r = agent(brain)
         val id = r.agent.start("bibimbap please"); advanceUntilIdle()
         r.agent.retry(id); advanceUntilIdle()
@@ -246,6 +246,31 @@ class AgentTest {
             line.contains("sign-in expired") shouldBe false
             line.contains("secret fixture") shouldBe false
         }
+    }
+
+    // Like any client of a hosted model: a dropped connection or a 5xx is tried again (after 1.5 s, then 4 s). Only the model
+    // call repeats: a tool that already ran is not run again, because nothing runs until a reply has arrived.
+    @Test fun aNetworkBlipOnTheModelCallIsRetriedWithoutRerunningTools() = runTest {
+        val tool = places()
+        val brain = ScriptedBrain(call("find_places"), { throw BrainError("x", code = "network") },
+            { throw BrainError("x", code = "503") }, text("done"))
+        val r = agent(brain, tool)
+        val id = r.agent.start("x"); advanceUntilIdle()
+        r.session(id).say shouldBe Say.Answer("done")
+        tool.runs shouldBe 1
+        brain.seen.size shouldBe 4
+    }
+
+    @Test fun retriesAreBoundedAndSignInErrorsAreNotRetried() = runTest {
+        val down = ScriptedBrain(*Array(4) { { throw BrainError("x", code = "google_oauth_network") } })
+        val r = agent(down)
+        val id = r.agent.start("x"); advanceUntilIdle()
+        r.session(id).say.shouldBeInstanceOf<Say.Problem>().line shouldContain "google_oauth_network"
+        down.seen.size shouldBe 3 // the first try and two retries
+        val denied = ScriptedBrain({ throw BrainError("x", auth = true, code = "401") }, text("never"))
+        val r2 = agent(denied)
+        r2.agent.start("x"); advanceUntilIdle()
+        denied.seen.size shouldBe 1
     }
 
     @Test fun slowModelTimesOut() = runTest {

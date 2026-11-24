@@ -182,11 +182,11 @@ class DraftTest {
     }
 
     @Test fun aProblemFurtherDownAListNeverSaysNothingWasSent() = runTest {
-        val brain = ScriptedBrain(draftMore("NeighborB", "hi"), { throw BrainError("x", code = "503") })
+        val brain = ScriptedBrain(draftMore("NeighborB", "hi"), { throw BrainError("x", code = "400") })
         val (store, agent) = agent(brain, FakeDrafter(mapOf("neighborb" to "NeighborB")))
         val id = agent.start("say hi to NeighborB and Guest"); advanceUntilIdle()
         agent.sent(id, "task-1"); advanceUntilIdle()
-        (store.load(id)!!.say as Say.Problem).line shouldBe "Misura can't reach the model (503). The rest is still to do."
+        (store.load(id)!!.say as Say.Problem).line shouldBe "Misura can't reach the model (400). The rest is still to do."
     }
 
     @Test fun tryAgainAfterAFailedSendDownAListSaysItDidNotGoOut() = runTest {

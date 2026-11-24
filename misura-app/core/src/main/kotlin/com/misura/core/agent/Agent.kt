@@ -453,7 +453,7 @@ class Agent(
             val today = java.time.Instant.ofEpochMilli(clock()).atZone(java.time.ZoneId.systemDefault()).toLocalDate().let { "Today is ${it.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH)}, $it. " } + (if (device.isBlank()) "" else "This phone: $device. ")
             // Exhausted work may still yield found results or a clarification; this reply cannot run actions or draft messages.
             val finish = if (finishing) "\nNo work calls remain. In one reply, use at most two display calls to show verified results and ask for missing details, or explain what remains. Check recorded outcomes; never claim an unconfirmed action succeeded." else ""
-            val reply = withTimeout(callTimeoutMs) { brain.next(today + systemPrompt(about(), disabled) + finish, splitMixed(store.turns(id)), specs.filter { it.name !in disabled && (!finishing || it.name in FINAL_VIEWS) }) }
+            val reply = retryBlips { withTimeout(callTimeoutMs) { brain.next(today + systemPrompt(about(), disabled) + finish, splitMixed(store.turns(id)), specs.filter { it.name !in disabled && (!finishing || it.name in FINAL_VIEWS) }) } }
             reply.usage?.let { onStep("session $id model call: ${it.line()}") } // numbers only
             if (reply is BrainReply.Calls) savePending(id, PendingCalls())
             if (reply is BrainReply.Text && sourcedThisTurn) {

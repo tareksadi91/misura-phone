@@ -13,12 +13,12 @@ class ThreadTest {
     @Test fun completedBatchThenFailureDoesNotDenyDelivery() = runTest {
         val store = InMemorySessionStore()
         val tool = FakeTool(ToolSpec("effect","",obj())) { obj("receipt" to JsonPrimitive("done")) }
-        val agent = Agent(store, ScriptedBrain(call("effect"), { throw BrainError("failed", code="503") }),
+        val agent = Agent(store, ScriptedBrain(call("effect"), { throw BrainError("failed", code="400") }),
             listOf(tool), { 0 }, this)
         val id = agent.start("do it")
         advanceUntilIdle()
         tool.runs shouldBe 1
-        (store.load(id)!!.say as Say.Problem).line shouldBe "Misura can't reach the model (503)."
+        (store.load(id)!!.say as Say.Problem).line shouldBe "Misura can't reach the model (400)."
     }
 
     @Test fun acceptedWordsSurviveFailingQuestionPresentation() = runTest {

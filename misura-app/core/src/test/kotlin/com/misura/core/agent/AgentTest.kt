@@ -273,6 +273,15 @@ class AgentTest {
         denied.seen.size shouldBe 1
     }
 
+    // The app search gets the whole request: a condition left out can't be matched to the app's own category (owner, 24 Nov).
+    @Test fun appSearchesKeepTheUsersConditions() = runTest {
+        var system = ""
+        val r = agent(object : Brain { override suspend fun next(s: String, turns: List<Turn>, tools: List<ToolSpec>): BrainReply { system = s; return text("ok")() } })
+        r.agent.start("x"); advanceUntilIdle()
+        system shouldContain "pass use_app the user's whole request with its conditions"
+        system.contains("without conditions") shouldBe false
+    }
+
     @Test fun slowModelTimesOut() = runTest {
         val r = agent(ScriptedBrain({ delay(31_000); text("late")() }))
         val id = r.agent.start("x"); advanceUntilIdle()

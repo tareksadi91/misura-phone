@@ -572,12 +572,29 @@ class HiddenChatTest {
         itemsOf(r).size shouldBe 2
     }
 
-    /** The model never calls item: it is told to record at rounds 6 and 12 and at no other round. A run that recorded something never gets the line. */
+    /** The hand is told to use the app's own categories for conditions the tiles won't show, and never to drop conditions (owner, 24 Nov: a keyword search missed the app's category). */
+    @Test fun theHandIsToldToUseTheAppsCategoriesAndKeepConditions(): Unit = runBlocking {
+        var sent = ""
+        mk(object : com.misura.core.agent.Brain {
+            override suspend fun next(system: String, turns: List<com.misura.core.agent.Turn>, tools: List<com.misura.core.agent.ToolSpec>): com.misura.core.agent.BrainReply {
+                sent = system
+                return com.misura.core.agent.BrainReply.Calls(kotlinx.serialization.json.buildJsonObject {}, listOf(com.misura.core.agent.ToolCall(null, "done", args("result" to "ok"))))
+            }
+        }, maxActions = 2, filesDir = ctx.filesDir).run(goal())
+        sent.contains("keep every condition in the goal") shouldBe true
+        sent.contains("open the app's own categories or filters") shouldBe true
+        sent.contains("don't go looking for them") shouldBe true // eligibility is rarely a filter: no hunting (live 24 Nov)
+        sent.contains("search once with the user's words") shouldBe false
+    }
+
+    /** The model never calls item: it is told to record at rounds 6 and 12 and with five steps left, at no other round. A run that recorded something never gets the line. */
     @Test fun theRecordFirstNudgeComesAtRoundsSixAndTwelveOnlyWhileNothingIsRecorded(): Unit = runBlocking {
         val told = mutableListOf<String>()
         val hand = mk(brainOf({ told += it; "wait" to args() }), maxActions = 13, filesDir = ctx.filesDir)
         hand.run(goal())
-        told.indices.filter { com.misura.phone.hands.UseApp.NUDGE in told[it] }.map { it + 1 } shouldBe listOf(6, 12)
+        // Rounds 6 and 12, and 9: five steps left of 13 with nothing recorded (24 Nov: the budget went on filters with results in sight).
+        told.indices.filter { com.misura.phone.hands.UseApp.NUDGE in told[it] }.map { it + 1 } shouldBe listOf(6, 9, 12)
+        check("Steps left: 13" in told.first() && "Steps left: 1" in told.last()) { told.first() }
         val got = mutableListOf<String>()
         val open = { t: String -> "tap" to args("i" to at(t, "Shop")) }
         val rec = mk(brainOf(open, { got += it; "item" to args("i" to at(it, "Blue lamp"), "title" to "Blue lamp", "price" to "12 €") }, { got += it; "wait" to args() }), maxActions = 13, filesDir = ctx.filesDir)
@@ -1294,6 +1311,46 @@ class HiddenChatTest {
         check(prompts.indexOfFirst { REPEAT_HINT in it } in 1..5) { prompts.joinToString("\n---\n") }
     }
 
+    /**
+     * The live model ignored the hint (sports-club app, 24 Nov: the Filters sheet tapped unchanged until the step cap). The third same tap on a
+     * same-looking screen is not made: the model is told to record what the list shows, go back or finish. Red before: every tap goes through
+     * and the run runs out of steps.
+     */
+    @Test fun aThirdSameTapOnTheSameScreenIsNotMade(): Unit = runBlocking {
+        val prompts = mutableListOf<String>()
+        var sheets = 0
+        val brain = brainOf({ t ->
+            prompts += t
+            when {
+                REFUSED in t -> "done" to args("result" to "the list as it is")
+                "TestChat" in t -> "tap" to args("i" to at(t, "Venues"))
+                "Status:" in t -> "tap" to args("i" to at(t, "Workout Types")).also { sheets++ } // ignores the hint: the same filter again
+                else -> "tap" to args("i" to at(t, "Confirm"))
+            }
+        })
+        val r = mk(brain, maxActions = 14).run(goal())
+        check(r["error"] == null) { "ran out of steps: $r\nlast screen: ${prompts.lastOrNull()}" }
+        check(prompts.any { REFUSED in it }) { prompts.joinToString("\n---\n") }
+        check(sheets == 3) { "asked $sheets times" } // the third ask was refused, so the sheet opened twice only
+    }
+
+    /** A model that makes the refused tap again after being told gets it: the same words can hide progress (Codex review). */
+    @Test fun aRefusedTapMadeAgainGoesThrough(): Unit = runBlocking {
+        var told = false; var after = 0; var sheetAfter = 0
+        val brain = brainOf({ t ->
+            if (REFUSED in t) told = true
+            when {
+                "TestChat" in t -> "tap" to args("i" to at(t, "Venues"))
+                told && "Status:" in t && after++ > 0 -> "done" to args("result" to "ok")
+                "Status:" in t -> "tap" to args("i" to at(t, "Workout Types"))
+                else -> { if (told) sheetAfter++; "tap" to args("i" to at(t, "Confirm")) }
+            }
+        })
+        val r = mk(brain, maxActions = 14).run(goal())
+        check(r["error"] == null) { r.toString() }
+        check(told && after >= 2 && sheetAfter >= 1) { "told=$told after=$after sheetAfter=$sheetAfter" } // refused once, then the insisted tap opened the sheet and the run went on
+    }
+
     /** A hand that gives up still hands back what it noted on the way (fail dropped the notes before 23 Nov; running out kept them). */
     @Test fun aFailingHandKeepsItsNotes(): Unit = runBlocking {
         val r = mk(brainOf({ _ -> "note" to args("text" to "Gym A is open till 22") }, { _ -> "fail" to args("reason" to "no such filter in this app") })).run(goal())
@@ -1380,6 +1437,8 @@ class HiddenChatTest {
     companion object {
         /** Words of the hand's repeat line the scripted models react to. */
         const val REPEAT_HINT = "same tap on a same-looking screen"
+        /** Words of the line for a third same tap, which is not made. */
+        const val REFUSED = "not made: the third same tap"
         const val TEST_PKG = "com.misura.testapp"
         const val A11Y = "com.misura.phone/com.misura.phone.hidden.MisuraAccessibility"
         const val ENTRY = "$TEST_PKG:id/entry"

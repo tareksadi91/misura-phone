@@ -70,6 +70,40 @@ class ConfiguredBrainTest {
         }
     }
 
+    /** "Cafes near me" through Agent → routed find_places: the phone's fix reaches Google's search, never the model's turns. */
+    @Test fun agentSearchesWhereThePhoneIsWithoutTellingTheModelTheCoordinates() = runBlocking<Unit> {
+        val grounding = """{"candidates":[{"content":{"parts":[{"text":"Fixture Café | Coffee | 08:00"}]},"groundingMetadata":{"groundingChunks":[{"maps":{"title":"Fixture Café","placeId":"fixture-cafe","uri":"https://maps.google.com/?cid=fixture"}}]}}]}"""
+        TinyHttp { request -> 200 to if (request.method == "GET") """{"location":{"latitude":48.1,"longitude":11.5}}""" else grounding }.use { http ->
+            val route = ModelRoute(ModelProvider.VERTEX, "fixture-model", null, "fixture-hand", null, null,
+                null, "fixture-google-token", "fixture-project", SearchProvider.EXA, "fixture-exa-key", false, false)
+            val context = ModelRoutes({ route }, http.base).capture()
+            val phone: suspend () -> Pair<Double, Double>? = { 48.137 to 11.575 }
+            val routed = RouteTool(FindPlaces({ null }, { "" }, vertexBase = http.base)) { captured ->
+                FindPlaces(captured.google.tokens, { captured.google.project }, vertexBase = http.base, placesBase = http.base + "/v1", here = phone)
+            }
+            val seen = mutableListOf<String>()
+            var round = 0
+            val brain = object : Brain {
+                override suspend fun next(system: String, turns: List<Turn>, tools: List<ToolSpec>): BrainReply {
+                    seen += turns.joinToString { it.content.toString() }
+                    val (name, args) = if (round++ == 0) "find_places" to buildJsonObject { put("query", "cafes") }
+                        else "show_places" to buildJsonObject { putJsonArray("placeIds") { add(JsonPrimitive("fixture-cafe")) }; put("pick", "fixture-cafe"); put("line", "Cafe fixture.") }
+                    val content = buildJsonObject { put("role", "model"); putJsonArray("parts") { add(callPart(null, name, args)) } }
+                    return BrainReply.Calls(content, listOf(ToolCall(null, name, args)))
+                }
+            }
+            val store = Store()
+            val agent = Agent(store, brain, listOf(routed), System::currentTimeMillis, this, turnContext = { context })
+            val id = agent.start("cafes near me")
+            withTimeout(5000) { while (store.load(id)?.status == SessionStatus.THINKING) delay(10) }
+            assertEquals(SessionStatus.IDLE, store.load(id)?.status)
+            val search = Json.parseToJsonElement(http.requests.first { it.method == "POST" }.body).jsonObject
+            assertEquals("48.137", search["toolConfig"]!!.jsonObject["retrievalConfig"]!!.jsonObject["latLng"]!!.jsonObject["latitude"]!!.jsonPrimitive.content)
+            assertTrue(seen.last().contains("where the phone is now"))
+            assertFalse(seen.any { it.contains("48.137") || it.contains("11.575") })
+        }
+    }
+
     private fun route(key: String, provider: ModelProvider = ModelProvider.OPENAI,
         main: String = "main-model", hand: String = "hand-model", mainThinking: String = "HIGH", handThinking: String = "LOW") = ModelRoute(
         provider, main, key, hand, mainThinking, handThinking, null,

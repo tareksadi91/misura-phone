@@ -87,7 +87,7 @@ object MisuraGraph {
         val brainPrefs = app.getSharedPreferences("brain", Context.MODE_PRIVATE)
         credentials = com.misura.phone.setup.CredentialSettings(brainPrefs)
         val routes = ModelRoutes(credentials::route)
-        val places = RouteTool(FindPlaces(TokenProvider { null }, { "" })) { ctx -> FindPlaces(ctx.google.tokens, { ctx.google.project }) }
+        val places = RouteTool(FindPlaces(TokenProvider { null }, { "" })) { ctx -> FindPlaces(ctx.google.tokens, { ctx.google.project }, here = { com.misura.phone.brain.PhoneLocation.now(app) }) }
         val lookup = RouteTool(LookUp(TokenProvider { null }, { "" }), ::LookUp)
         val useApp = com.misura.phone.hands.UseApp(hidden, ConfiguredHandBrain, { apps }, log = { if (BuildConfig.DEBUG || BuildConfig.DIAGNOSTICS) android.util.Log.i("MisuraAgent", it) }, filesDir = app.filesDir, scope = scope)
         parkedApp = useApp::beforeHiddenOpen; bringParked = useApp::bringParked

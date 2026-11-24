@@ -111,8 +111,8 @@ No skills loaded, network calls, Gradle invocations, Git writes, commits, or pub
 | Destination | Data / authentication |
 | --- | --- |
 | `oauth2.googleapis.com/token` | Signed service-account assertion; endpoint is fixed rather than read from key JSON. |
-| `aiplatform.googleapis.com` | Gemini prompts, briefing, notes, conversation/tool context and app-screen text; OAuth bearer header plus billing-project header. Google Search/Maps grounding runs through Vertex. |
-| `places.googleapis.com` | Place IDs/searches/photo lookup; OAuth bearer header, no API key in URL. Returned photo URLs are fetched without authorization headers. |
+| `aiplatform.googleapis.com` | Gemini prompts, briefing, notes, conversation/tool context and app-screen text; OAuth bearer header plus billing-project header. Google Search/Maps grounding runs through Vertex. Since 24 Nov a place search with no named place also sends the phone's current coordinates (fresh fix ≤ 10 min, read per search, not stored) as the Maps grounding `latLng`; they are not put into the model's conversation or tool results. |
+| `places.googleapis.com` | Place IDs/searches/photo lookup; a search with no named place carries the same coordinates as a 20 km location bias; OAuth bearer header, no API key in URL. Returned photo URLs are fetched without authorization headers. |
 | `api.exa.ai` | Optional web question; Exa key in `x-api-key`, never query string. Google grounding fallback when absent/failing. |
 | `tiles.openfreemap.org` | Map style and viewport-dependent tiles; style can reference additional asset hosts. No Misura credential is passed. |
 | Installed speech recognizer, target apps, external map/browser handlers | Their own network behavior/accounts; speech may use the recognizer's remote service. Not an offline guarantee. |

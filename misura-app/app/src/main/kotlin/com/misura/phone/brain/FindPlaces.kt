@@ -33,6 +33,8 @@ class FindPlaces(
     private val vertexBase: String = VERTEX_BASE,
     private val placesBase: String = "https://places.googleapis.com/v1",
     private val model: String = "gemini-3.8-flash",
+    /** Where the phone is now (fresh fix only), or null. Only used when the model names no place. */
+    private val here: suspend () -> Pair<Double, Double>? = { null },
 ) : Tool {
     override val app = "com.google.android.apps.maps" // Maps grounding + Places: the step shows the Maps mark
     override val spec = ToolSpec(
@@ -62,15 +64,19 @@ class FindPlaces(
         val project = project()
         val token = tokens.token() ?: throw BrainError("no sign-in token", auth = true)
         val query = (args["query"] as? JsonPrimitive)?.content ?: return buildJsonObject { put("error", "query is required") }
-        val near = (args["near"] as? JsonPrimitive)?.content
+        // A place the user named wins; "here"/"me" or no place means where the phone is now (SYSTEM §3 Location).
+        val near = (args["near"] as? JsonPrimitive)?.content?.trim()?.takeUnless { it.isEmpty() || it.lowercase().removePrefix("my ") in HERE_WORDS }
+        val at = if (near == null) here() else null
         val day = (args["day"] as? JsonPrimitive)?.content ?: LocalDate.now().dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
-        val places = grounded(token, project, query, near, day)
+        val places = grounded(token, project, query, near, at, day)
         // Grounding names that matched no source get their id from a quick text search (~1 s), so the model never
         // has to re-run this ~30 s search just to get ids it can show.
-        coroutineScope { places.filter { it.placeId == null }.map { p -> async { runCatching { resolve(token, project, p, near) } } }.awaitAll() }
+        coroutineScope { places.filter { it.placeId == null }.map { p -> async { runCatching { resolve(token, project, p, near, at) } } }.awaitAll() }
         coroutineScope { places.filter { it.placeId != null }.map { p -> async { runCatching { details(token, project, p, day) } } }.awaitAll() }
         return buildJsonObject {
             put("query", query)
+            // Coordinates go to Google only; the model just learns which kind of place was searched around.
+            put("searchedNear", near ?: if (at != null) "where the phone is now" else "unknown: the phone's location is off, not allowed or not found")
             putJsonArray("places") {
                 places.forEach { p ->
                     add(buildJsonObject {
@@ -86,12 +92,13 @@ class FindPlaces(
         }
     }
 
-    private suspend fun grounded(token: String, project: String, query: String, near: String?, day: String): List<Place> {
-        val prompt = "List up to 10 real places for: $query${near?.let { " near $it" } ?: ""}. " +
+    private suspend fun grounded(token: String, project: String, query: String, near: String?, at: Pair<Double, Double>?, day: String): List<Place> {
+        val prompt = "List up to 10 real places for: $query${near?.let { " near $it" } ?: if (at != null) " near me" else ""}. " +
             "One per line, exactly: name | why it fits (at most 8 words) | opening hours on $day. Write - when hours are unknown. No other text."
         val body = buildJsonObject {
             putJsonArray("contents") { add(buildJsonObject { put("role", "user"); putJsonArray("parts") { add(buildJsonObject { put("text", prompt) }) } }) }
             putJsonArray("tools") { add(buildJsonObject { putJsonObject("googleMaps") {} }) }
+            at?.let { (lat, lng) -> putJsonObject("toolConfig") { putJsonObject("retrievalConfig") { putJsonObject("latLng") { put("latitude", lat); put("longitude", lng) } } } }
         }
         // Grounded search measured at ~30 s on 10 Nov; the agent's 90 s turn limit still bounds it.
         val (code, text) = http("POST", vertexBase + vertexPath(model, project), googleHeaders(token, project), body.toString(), timeoutMs = 60_000)
@@ -111,8 +118,11 @@ class FindPlaces(
     }
 
     /** Takes the top text-search hit only when its name is the same as the grounded name (no guessing at a lookalike). */
-    private suspend fun resolve(token: String, project: String, p: Place, near: String?) {
-        val body = buildJsonObject { put("textQuery", p.label + (near?.let { " $it" } ?: "")) }
+    private suspend fun resolve(token: String, project: String, p: Place, near: String?, at: Pair<Double, Double>?) {
+        val body = buildJsonObject {
+            put("textQuery", p.label + (near?.let { " $it" } ?: ""))
+            at?.let { (lat, lng) -> putJsonObject("locationBias") { putJsonObject("circle") { putJsonObject("center") { put("latitude", lat); put("longitude", lng) }; put("radius", 20_000.0) } } }
+        }
         val (code, text) = http("POST", "$placesBase/places:searchText", googleHeaders(token, project) + ("X-Goog-FieldMask" to "places.id,places.googleMapsUri,places.displayName"), body.toString())
         if (code >= 400) return
         val top = (Json.parseToJsonElement(text).jsonObject["places"] as? JsonArray)?.firstOrNull() as? JsonObject ?: return
@@ -146,6 +156,7 @@ class FindPlaces(
 
     private companion object {
         /** Index + 1 = the €-count we show; FREE and UNSPECIFIED show no price. */
+        val HERE_WORDS = setOf("here", "me", "near me", "around here", "nearby", "current location", "location", "where i am")
         val PRICE_LEVELS = listOf("PRICE_LEVEL_INEXPENSIVE", "PRICE_LEVEL_MODERATE", "PRICE_LEVEL_EXPENSIVE", "PRICE_LEVEL_VERY_EXPENSIVE")
     }
 }

@@ -190,6 +190,10 @@ fun SetupScreen(activity: ComponentActivity, settings: CredentialSettings, onDon
             MButton(if (phone.voiceAlerts) "Voice and alerts · On" else "Allow voice and alerts", Kind.Forward, Modifier.fillMaxWidth()) {
                 permissions.launch(arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS))
             }
+            MButton(if (phone.location) "Location · On" else "Location for places near you", Kind.Secondary, Modifier.fillMaxWidth()) {
+                permissions.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION))
+            }
+            Text("Optional. Read only when you ask for places near you; approximate is enough. If Android stops asking, allow it in Misura's app settings.", style = ST.nav)
             MButton("Contacts and calendar", Kind.Secondary, Modifier.fillMaxWidth()) {
                 permissions.launch(arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.READ_CALENDAR))
             }
@@ -269,7 +273,7 @@ private fun CredentialSettings.status() = CredentialStatus(
 
 private data class PhoneStatus(
     val notificationOn: Boolean, val accessibilityOn: Boolean, val homeOn: Boolean, val shizukuOn: Boolean,
-    val voiceAlerts: Boolean, val apps: List<Pair<String, String>>, val blocked: Set<String>,
+    val voiceAlerts: Boolean, val location: Boolean, val apps: List<Pair<String, String>>, val blocked: Set<String>,
     /** Installed known banks plus apps the owner blocked; [blockable] = other launcher apps, (package, label). */
     val agentApps: List<AgentAppRow> = emptyList(), val blockable: List<Pair<String, String>> = emptyList(),
     val routines: List<com.misura.core.routine.Routine> = emptyList(),
@@ -300,7 +304,8 @@ private fun readPhoneStatus(activity: ComponentActivity, access: NotificationAcc
             .getEnabledAccessibilityServiceList(android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
             .any { it.resolveInfo.serviceInfo.packageName == activity.packageName },
         activity.getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_HOME), ShizukuBridge.ready(),
-        granted(Manifest.permission.RECORD_AUDIO) && granted(Manifest.permission.POST_NOTIFICATIONS), apps, blocked, agentApps, blockable,
+        granted(Manifest.permission.RECORD_AUDIO) && granted(Manifest.permission.POST_NOTIFICATIONS),
+        granted(Manifest.permission.ACCESS_COARSE_LOCATION) || granted(Manifest.permission.ACCESS_FINE_LOCATION), apps, blocked, agentApps, blockable,
         com.misura.phone.routine.RoutineStore(activity).all().map { it.routine }.sortedBy { it.title.lowercase() },
     )
 }

@@ -1334,6 +1334,22 @@ class HiddenChatTest {
         check(sheets == 3) { "asked $sheets times" } // the third ask was refused, so the sheet opened twice only
     }
 
+    /** Enter pressed on a screen it doesn't change (25 Nov: a search box that only lists suggestions, Enter seven times): the third is not made. Red before: out of steps. */
+    @Test fun aThirdSameEnterOnTheSameScreenIsNotMade(): Unit = runBlocking {
+        val prompts = mutableListOf<String>()
+        val brain = brainOf({ t ->
+            prompts += t
+            when {
+                "not made: the third Enter" in t -> "done" to args("result" to "no results for that")
+                "TestChat" in t.substringAfter("Screen:") -> "tap" to args("i" to at(t, "Search form"))
+                else -> "key" to args("name" to "enter")
+            }
+        })
+        val r = mk(brain, maxActions = 10).run(goal())
+        check(r["error"] == null) { "ran out of steps: $r" }
+        check(prompts.last().split("pressed enter").size - 1 == 2) { prompts.last() } // two went through, the third was not made
+    }
+
     /** A model that makes the refused tap again after being told gets it: the same words can hide progress (Codex review). */
     @Test fun aRefusedTapMadeAgainGoesThrough(): Unit = runBlocking {
         var told = false; var after = 0; var sheetAfter = 0

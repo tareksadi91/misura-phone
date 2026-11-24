@@ -583,6 +583,7 @@ class HiddenChatTest {
         }, maxActions = 2, filesDir = ctx.filesDir).run(goal())
         sent.contains("keep every condition in the goal") shouldBe true
         sent.contains("open the app's own categories or filters") shouldBe true
+        sent.contains("don't go looking for them") shouldBe true // eligibility is rarely a filter: no hunting (live 24 Nov)
         sent.contains("search once with the user's words") shouldBe false
     }
 

@@ -364,7 +364,9 @@ class UseApp(
             fun gaveUp(first: String) = out(err("$first\n" + (if (found.isEmpty()) "" else "Found so far: ${found.joinToString("; ")}\n") + "Last: ${did.takeLast(3).joinToString("; ")}"))
             fun ms(from: Long) = (System.nanoTime() - from) / 1_000_000
             /** A failed record's reason for the log: the words before its colon only, never screen words. */
-            fun why(r: String) = if (r.startsWith("recorded")) "" else " why=${r.substringBefore(':').take(30).replace(' ', '_')}"
+            fun why(r: String) = if (r.startsWith("recorded")) "" else " why=" + when {
+                r == CUT_OFF -> "cut"; "no such element" in r -> "no_element"; "needs title" in r -> "no_title"; "not part of one thing" in r -> "not_one_thing"
+                "exactly as shown" in r -> "words_not_on_tile"; r.startsWith("already recorded") -> "already"; "recorded already" in r -> "full"; "enough" in r -> "enough"; else -> "other" }
             /** Records one thing from the frame [root] (read just now, also the one the photo is cut from). Facts come off the screen, not from the model. */
             suspend fun recordItem(c: ToolCall, root: UiNode, seen: List<Seen>, lap: (String, Long) -> Unit): String {
                 val e = (c.args["i"] as? JsonPrimitive)?.intOrNull?.let(seen::getOrNull) ?: return "no such element"
@@ -537,9 +539,9 @@ class UseApp(
                 val words = synchronized(lock) { heard.toList() }
                 if (words.size > told) { told = words.size; note("$app: got it, adjusting") }
                 // The hand didn't know its budget and spent it all on filters with the results in sight (24 Nov): it sees the steps left, and the
-                // nudge also comes once when 5 are left with nothing recorded.
+                // nudge also comes once when 2/5 of them are left with nothing recorded (live: a nudge at 5 left came too late to collect).
                 // Once, on a real model call: a round run from queued steps sends no prompt (Codex review P2).
-                val lateNudge = things.isEmpty() && !lateNudged && maxActions - n <= 5
+                val lateNudge = things.isEmpty() && !lateNudged && maxActions - n <= maxActions * 2 / 5 // 10 of 25: room left to collect after it
                 val user = handPrompt(goal, thing, count, words, did, things.isEmpty() && ((modelRounds + 1) in NUDGE_ROUNDS || lateNudge), seen, near?.line(), maxActions - n)
                 if (queued == null && lateNudge) lateNudged = true
                 if (late()) return gaveUp("took too long")

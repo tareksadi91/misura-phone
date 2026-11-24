@@ -1396,6 +1396,7 @@ class HiddenChatTest {
                 "TestChat" in t -> "tap" to args("i" to at(t, "Venues"))
                 "Venues in Berlin" in t && !typed -> { typed = true; "type" to args("i" to at(t, "Berlin"), "text" to "Munich") }
                 "Venues in Munich" in t && "area: Munich" !in t -> "area" to args("text" to "Munich")
+                "recorded item" in t -> "done" to args("result" to "venues in Munich") // near runs look past the count: the model ends it
                 else -> "item" to args("i" to at(t, "Venues in Munich"), "title" to "Venues in Munich")
             }
         })
@@ -1404,7 +1405,59 @@ class HiddenChatTest {
         check(prompts.all { "they are in Munich now" in it }) { prompts.first() }
         (r["searchArea"] as kotlinx.serialization.json.JsonPrimitive).content shouldBe "Munich"
         (r["userIn"] as kotlinx.serialization.json.JsonPrimitive).content shouldBe "Munich"
-        check(r["items"] != null) { r.toString() } // ended by the count, not by done
+        check(r["items"] != null) { r.toString() }
+    }
+
+    /** A scripted model on the testapp Gyms page: opens it, says the area, then alternates recording with a swipe down. [onePerScreen] = only the first gym not yet recorded. */
+    private fun gymsBrain(prompts: MutableList<String>, onePerScreen: Boolean) = object : com.misura.core.agent.Brain {
+        var recordNext = true
+        override suspend fun next(system: String, turns: List<com.misura.core.agent.Turn>, tools: List<com.misura.core.agent.ToolSpec>): com.misura.core.agent.BrainReply {
+            val t = turns.last().content.toString(); prompts += t
+            val scr = t.substringAfter("Screen:") // which page: the screen only, not the steps done so far
+            fun one(name: String, a: kotlinx.serialization.json.JsonObject) = com.misura.core.agent.ToolCall(null, name, a)
+            val gyms = GYM.findAll(scr).map { m -> m.groupValues[1].toInt() to m.groupValues[2] }.toList()
+            val calls = when {
+                "TestChat" in scr -> listOf(one("tap", args("i" to at(scr, "Venues"))))
+                "Show gyms" in scr -> listOf(one("tap", args("i" to at(scr, "Show gyms"))))
+                "area: " !in t -> listOf(one("area", args("text" to "Munich")))
+                recordNext -> (if (onePerScreen) gyms.filter { (_, g) -> "recorded item: $g" !in t }.take(1) else gyms)
+                    .map { (i, g) -> one("item", args("i" to i, "title" to g)) }.ifEmpty { listOf(one("scroll", args("direction" to "down"))) }
+                else -> listOf(one("scroll", args("direction" to "down")))
+            }
+            if ("area: " in t && gyms.isNotEmpty()) recordNext = !recordNext
+            return com.misura.core.agent.BrainReply.Calls(kotlinx.serialization.json.buildJsonObject {}, calls)
+        }
+    }
+
+    /**
+     * "Gyms near me, one": the nearest can be further down than the first one (sports-club app, 24 Nov: first results 1.4–4.4 km unsorted and the
+     * count ended the run at once). A near run collects past the count (up to ten) and returns the items nearest first by the distance each tile
+     * shows; a tile with two distances or none has no distance. Red before: the count of one ends the run with one item.
+     */
+    @Test fun aNearRunLooksPastTheCountAndReturnsTheNearestFirst(): Unit = runBlocking {
+        val prompts = mutableListOf<String>()
+        val r = mk(gymsBrain(prompts, onePerScreen = false), maxActions = 20, filesDir = ctx.filesDir, whereNow = { "Munich" }).run(goal("near_user" to true, "count" to 1))
+        check(r["error"] == null) { "$r\n${prompts.lastOrNull()}" }
+        val items = (r["items"] as kotlinx.serialization.json.JsonArray).map { it as kotlinx.serialization.json.JsonObject }
+        fun JsonObject.s(k: String) = (this[k] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        check(items.size == 10) { r.toString() } // collected past the count of one, up to ten
+        check(items.first().s("title") == "Gym Hall") { "the nearest (400 m, below the first screen) must come first: $items" }
+        val metres = items.mapNotNull { it.s("distance")?.let { d -> com.misura.phone.hands.meters(d) } }
+        check(metres == metres.sorted() && metres.isNotEmpty()) { items.joinToString { "${it.s("title")} ${it.s("distance")}" } }
+        check(items.takeWhile { it.s("distance") != null }.size == metres.size) { "unknown distances must come last: $items" }
+        check(items.first { it.s("title") == "Gym Twin" }.s("distance") == null) { "two distances on one tile" }
+        check(items.first { it.s("title") == "Gym Blank" }.s("distance") == null) { "no distance on the tile" }
+        check(items.first { it.s("title") == "Gym East" }.s("distance") == "2,1 km") { "comma decimals, as written" }
+        check(r.s("order")?.startsWith("nearest first") == true) { r.toString() }
+    }
+
+    /** The ceiling: a near run that records one thing per screen ends after about three screens of results, not at the bottom of the list. Red without the cap. */
+    @Test fun aNearRunStopsAfterAboutThreeScreensOfResults(): Unit = runBlocking {
+        val prompts = mutableListOf<String>()
+        val r = mk(gymsBrain(prompts, onePerScreen = true), maxActions = 25, filesDir = ctx.filesDir, whereNow = { "Munich" }).run(goal("near_user" to true, "count" to 1))
+        check(r["error"] == null) { "$r\n${prompts.lastOrNull()}" }
+        check((r["result"] as kotlinx.serialization.json.JsonPrimitive).content.startsWith("checked about 3 screens")) { r.toString() }
+        check((r["items"] as kotlinx.serialization.json.JsonArray).size in 2..9) { r.toString() }
     }
 
     /** Location unknown: the hand reads the app's area and leaves it; the result says the area and that where the user is is unknown. */
@@ -1437,6 +1490,8 @@ class HiddenChatTest {
     companion object {
         /** Words of the hand's repeat line the scripted models react to. */
         const val REPEAT_HINT = "same tap on a same-looking screen"
+        /** A gym tile's title line on the testapp Gyms page, as the hand is shown it. */
+        val GYM = Regex("""\[(\d+)] \w+ \\"(Gym \w+)\\"""")
         /** Words of the line for a third same tap, which is not made. */
         const val REFUSED = "not made: the third same tap"
         const val TEST_PKG = "com.misura.testapp"

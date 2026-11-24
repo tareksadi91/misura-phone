@@ -43,6 +43,25 @@ object PhoneLocation {
         return fix?.takeIf { fresh(age(it)) }?.let { it.latitude to it.longitude }
     }
 
+    /**
+     * The city ([android.location.Address.getLocality]) at [at], for the hand's "near the user" runs. Null when there is no geocoder, no
+     * locality (a county or district is not a city), an error or no answer within [WAIT_MS]. The platform geocoder may ask its provider
+     * (Google on GMS phones) over the network: the coordinates go there, never to the model (OSS_AUDIT data boundary).
+     */
+    suspend fun city(ctx: Context, at: Pair<Double, Double>): String? {
+        if (!android.location.Geocoder.isPresent()) return null
+        return withTimeoutOrNull(WAIT_MS) {
+            suspendCancellableCoroutine<String?> { c ->
+                try {
+                    android.location.Geocoder(ctx).getFromLocation(at.first, at.second, 1, object : android.location.Geocoder.GeocodeListener {
+                        override fun onGeocode(found: MutableList<android.location.Address>) { if (c.isActive) c.resume(found.firstOrNull()?.locality?.trim()?.takeIf { it.isNotEmpty() }) }
+                        override fun onError(msg: String?) { if (c.isActive) c.resume(null) }
+                    })
+                } catch (_: Exception) { if (c.isActive) c.resume(null) }
+            }
+        }
+    }
+
     private fun age(l: Location) = SystemClock.elapsedRealtimeNanos() - l.elapsedRealtimeNanos
     internal fun fresh(ageNanos: Long) = ageNanos in 0..MAX_AGE_MS * 1_000_000
 }

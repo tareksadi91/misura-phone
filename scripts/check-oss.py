@@ -50,7 +50,7 @@ REVIEWED_LOG_LINES = {
     },
     "misura-app/app/src/main/kotlin/com/misura/phone/MisuraGraph.kt": {
         "9a5b99f7d02f62dc22e1eacc3df189749351ad24b5ae06c304d1b0353cef9f0b",
-        "e36b8e2724da9817cd28a2ee394683dcd8d13a35288bd141df575008490cf718",
+        "7bea531a0489a8ccb5771828549c7cf9b88cc3709db90e564895639f5e4881d6",
         "949c463055c856666e82b68ff90e080924a94436bf4157d4b6b1a903dcbbd3a4",
     },
     "misura-app/app/src/main/kotlin/com/misura/phone/hands/Calendar.kt": {

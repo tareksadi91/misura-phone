@@ -42,6 +42,7 @@ class ChatActivity : Activity() {
     }
 
     private fun showList() {
+        city = "Berlin" // each run starts on the wrong city
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 96, 32, 32) }
         col.addView(TextView(this).apply { text = "TestChat"; textSize = 22f })
         Chat.convs.values.forEach { c ->
@@ -155,11 +156,21 @@ class ChatActivity : Activity() {
 
     /** The category picked on the Venues page's Categories sheet (null = all). */
     private var category: String? = null
+    /** The city the Venues page searches; starts somewhere else than the phone, as the account's city did. */
+    private var city = "Berlin"
 
     /** Venues with two filter buttons. Workout Types opens a sheet whose Confirm comes straight back here, unchanged. */
     private fun showVenues() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 96, 32, 32) }
         col.addView(TextView(this).apply { text = "Venues"; textSize = 22f })
+        // The city it searches, like a sports-club app stuck on the account's city: typing another one moves the list there.
+        val where = TextView(this).apply { text = "Venues in $city"; textSize = 16f }
+        col.addView(android.widget.EditText(this).apply { setText(city); hint = "City"; textSize = 16f; addTextChangedListener(object : android.text.TextWatcher {
+            override fun afterTextChanged(e: android.text.Editable?) { city = e.toString().trim(); where.text = "Venues in $city" }
+            override fun beforeTextChanged(a: CharSequence?, b: Int, c: Int, d: Int) {}
+            override fun onTextChanged(a: CharSequence?, b: Int, c: Int, d: Int) {}
+        }) })
+        col.addView(where)
         col.addView(TextView(this).apply { text = "Categories"; textSize = 18f; setPadding(0, 24, 0, 24); setOnClickListener { showSheet("Categories", listOf("Fitness", "Yoga"), checks = true) } })
         col.addView(TextView(this).apply { text = "Workout Types"; textSize = 18f; setPadding(0, 24, 0, 24); setOnClickListener { showSheet("Workout Types", listOf("On-site", "Live Online"), checks = false) } })
         col.addView(TextView(this).apply { id = R.id.status; text = "Status: ${category?.let { "$it only" } ?: "all venues"}"; textSize = 16f; setPadding(0, 24, 0, 24) })

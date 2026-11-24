@@ -60,6 +60,8 @@ class ChatActivity : Activity() {
         col.addView(TextView(this).apply { text = "Long form"; textSize = 18f; setPadding(0, 24, 0, 24); setOnClickListener { showLong() } })
         col.addView(TextView(this).apply { text = "Two forms"; textSize = 18f; setPadding(0, 24, 0, 24); setOnClickListener { showTwo() } })
         col.addView(TextView(this).apply { text = "Records"; textSize = 18f; setPadding(0, 24, 0, 24); setOnClickListener { showRecords() } })
+        // A filter page like a sports-club app's: one filter sheet that changes nothing the goal needs, one that does.
+        col.addView(TextView(this).apply { text = "Venues"; textSize = 18f; setPadding(0, 24, 0, 24); setOnClickListener { showVenues() } })
         onEnter = null; flip = null; swap = null
         setContentView(col)
     }
@@ -148,6 +150,50 @@ class ChatActivity : Activity() {
         }
         col.addView(st)
         onEnter = null; flip = null
+        setContentView(col)
+    }
+
+    /** The category picked on the Venues page's Categories sheet (null = all). */
+    private var category: String? = null
+
+    /** Venues with two filter buttons. Workout Types opens a sheet whose Confirm comes straight back here, unchanged. */
+    private fun showVenues() {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 96, 32, 32) }
+        col.addView(TextView(this).apply { text = "Venues"; textSize = 22f })
+        col.addView(TextView(this).apply { text = "Categories"; textSize = 18f; setPadding(0, 24, 0, 24); setOnClickListener { showSheet("Categories", listOf("Fitness", "Yoga"), checks = true) } })
+        col.addView(TextView(this).apply { text = "Workout Types"; textSize = 18f; setPadding(0, 24, 0, 24); setOnClickListener { showSheet("Workout Types", listOf("On-site", "Live Online"), checks = false) } })
+        col.addView(TextView(this).apply { id = R.id.status; text = "Status: ${category?.let { "$it only" } ?: "all venues"}"; textSize = 16f; setPadding(0, 24, 0, 24) })
+        // A native switch: its on/off is the node's checked state, not part of its words.
+        col.addView(android.widget.Switch(this).apply { text = "Open now"; textSize = 16f; setPadding(0, 24, 0, 24) })
+        onEnter = null; flip = null; swap = null
+        setContentView(col)
+    }
+
+    /**
+     * A filter sheet built the way the sports-club app builds it: each row a wordless clickable around its title, with the state only in a
+     * separate unclickable child's label; Confirm a wordless clickable around the word. Switch rows start on; check rows start unchecked.
+     */
+    private fun showSheet(title: String, rows: List<String>, checks: Boolean) {
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 96, 32, 32) }
+        col.addView(TextView(this).apply { text = title; textSize = 22f })
+        val on = rows.associateWith { !checks }.toMutableMap()
+        rows.forEach { name ->
+            col.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; isClickable = true; setPadding(0, 24, 0, 24)
+                val state = View(context).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES }
+                fun show() { state.contentDescription = if (checks) (if (on[name] == true) "Checked" else "Not checked") else "Filter is ${if (on[name] == true) "On" else "Off"}" }
+                show()
+                setOnClickListener { on[name] = on[name] != true; show() }
+                addView(TextView(context).apply { text = name; textSize = 16f }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                addView(state, LinearLayout.LayoutParams(96, 48))
+            }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        }
+        col.addView(LinearLayout(this).apply {
+            isClickable = true; setPadding(0, 24, 0, 24)
+            setOnClickListener { if (checks) category = on.filterValues { it }.keys.firstOrNull(); showVenues() }
+            addView(TextView(context).apply { text = "Confirm"; textSize = 16f })
+        })
+        onEnter = null; flip = null; swap = null
         setContentView(col)
     }
 

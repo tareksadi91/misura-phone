@@ -102,15 +102,17 @@ internal object PinMatch {
     private fun words(s: String) = fold(s).split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length >= 2 }
 
     /**
-     * Every word of the app's title (two letters or more, the city's own words left out) is in the map place's name, read without spaces or
-     * punctuation ("Power Plate" holds "powerplate"). "Atlas Fitness Westend" is not "Atlas Fitness Eastend"; a word the map name lacks means no match.
+     * Every word of the app's title (two letters or more, the city's own words left out) is a whole word of the map place's name, or up to three
+     * of its words run together ("Power Plate" is "powerplate"). Never part of a word: "Ost" is not in "Rostock" (Codex P2). "Atlas Fitness Westend"
+     * is not "Atlas Fitness Eastend"; a word the map name lacks means no match.
      */
     fun names(appTitle: String, placeName: String, city: String?): Boolean {
         val cityWords = city?.let(::words).orEmpty().toSet()
         val want = words(appTitle).filter { it !in cityWords }
         if (want.isEmpty()) return false
-        val key = fold(placeName).replace(Regex("[^\\p{L}\\p{N}]+"), "")
-        return want.all { it in key }
+        val parts = fold(placeName).split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }
+        val have = parts.indices.flatMap { i -> (1..3).mapNotNull { n -> parts.subList(i, minOf(i + n, parts.size)).takeIf { it.size == n }?.joinToString("") } }.toSet()
+        return want.all { it in have }
     }
 
     /** The place is where the app said: its distance from the phone within 25 % or 300 m (whichever is more) of the app's distance. */

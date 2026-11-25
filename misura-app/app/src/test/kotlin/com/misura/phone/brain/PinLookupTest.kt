@@ -25,6 +25,7 @@ class PinLookupTest {
         assertTrue("accents fold", PinMatch.names("Studio Grün", "STUDIO GRUN", null))
         assertTrue("ß is ss", PinMatch.names("Kraftstraße Gym", "Kraftstrasse Gym", null))
         assertFalse("a renamed venue", PinMatch.names("Atlas Fitness Nordpark", "Fit Base Nordpark", null))
+        assertTrue("run-together on the map side too (Codex re-check)", PinMatch.names("Kraftwerk Power Plate", "Kraftwerk PowerPlate EMS", null))
         assertFalse("never part of a word (Codex P2)", PinMatch.names("Gym Ost", "Gym Rostock", null))
         assertFalse("never part of a word, run-together either", PinMatch.names("Atlas Fit", "Atlas Fitness", null))
         assertFalse("only the city is no name", PinMatch.names("München", "München Hauptbahnhof", "München"))

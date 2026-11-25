@@ -102,18 +102,22 @@ internal object PinMatch {
     private fun words(s: String) = fold(s).split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length >= 2 }
 
     /**
-     * Every word of the app's title (two letters or more, the city's own words left out) is a whole word of the map place's name, or up to three
-     * of its words run together ("Power Plate" is "powerplate"). Never part of a word: "Ost" is not in "Rostock" (Codex P2). "Atlas Fitness Westend"
+     * Every word of the app's title (two letters or more, the city's own words left out) is a whole word of the map place's name, or the two
+     * names have the same words run together, either way, up to three words ("Power Plate" is "PowerPlate" and back). Never part of a word: "Ost" is not in "Rostock" (Codex P2). "Atlas Fitness Westend"
      * is not "Atlas Fitness Eastend"; a word the map name lacks means no match.
      */
     fun names(appTitle: String, placeName: String, city: String?): Boolean {
         val cityWords = city?.let(::words).orEmpty().toSet()
         val want = words(appTitle).filter { it !in cityWords }
         if (want.isEmpty()) return false
-        val parts = fold(placeName).split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }
-        val have = parts.indices.flatMap { i -> (1..3).mapNotNull { n -> parts.subList(i, minOf(i + n, parts.size)).takeIf { it.size == n }?.joinToString("") } }.toSet()
-        return want.all { it in have }
+        val have = runs(fold(placeName).split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }).map { it.second }.toSet()
+        // Both ways (Codex re-check P2): a title word may sit inside a run of title words that equals a run of map words ("Power Plate" ↔ "PowerPlate").
+        val covered = runs(want).filter { it.second in have }.flatMap { it.first }.toSet()
+        return want.indices.all { it in covered }
     }
+
+    /** Every run of one to three neighbouring words: the word indexes it spans and the words run together. */
+    private fun runs(w: List<String>) = w.indices.flatMap { i -> (1..3).filter { i + it <= w.size }.map { n -> (i until i + n).toList() to w.subList(i, i + n).joinToString("") } }
 
     /** The place is where the app said: its distance from the phone within 25 % or 300 m (whichever is more) of the app's distance. */
     fun near(phone: Pair<Double, Double>, place: Pair<Double, Double>, appMeters: Double) = abs(meters(phone, place) - appMeters) <= max(0.25 * appMeters, 300.0)

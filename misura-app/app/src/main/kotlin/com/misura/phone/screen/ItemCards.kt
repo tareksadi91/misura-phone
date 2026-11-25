@@ -29,6 +29,18 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import com.misura.core.agent.ItemFact
+import com.misura.core.agent.PlaceFact
+import com.misura.core.agent.directionsUrl
+import com.misura.phone.cards.Kind
+import com.misura.phone.cards.MButton
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.platform.LocalContext
 import com.misura.phone.cards.LocalRadii
 import com.misura.phone.cards.M
 import com.misura.phone.cards.T
@@ -37,9 +49,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/** Items screen: [line] (Misura's words) as plain text above the cards, which sit at the bottom like the place cards. */
+/**
+ * Items screen: [line] (Misura's words) as plain text above the cards, which sit at the bottom like the place cards.
+ * A near-me app find ([ItemFact.near], owner list item 7) is the decision screen instead: a map on top when some venue has a certain pin
+ * (never an empty map), text-only cards with Open in app and, with a pin, Directions; Misura's line goes on the pick's card. [stale] = the
+ * session is older than PLACES_MAX_AGE_MS: no pins (Places terms, like place cards). [onDirections] opens a Maps link.
+ */
 @Composable
-fun ItemScreen(items: List<ItemFact>, pick: String?, line: String?, index: Int, onIndex: (Int) -> Unit, onOpen: (ItemFact) -> Unit, modifier: Modifier = Modifier) {
+fun ItemScreen(items: List<ItemFact>, pick: String?, line: String?, index: Int, onIndex: (Int) -> Unit, onOpen: (ItemFact) -> Unit, modifier: Modifier = Modifier,
+    stale: Boolean = false, onDirections: ((String) -> Unit)? = null) {
+    if (items.any { it.near }) return NearItems(items, pick, line, index, onIndex, onOpen, modifier, stale, onDirections)
     Column(modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(M.p)) {
         Spacer(Modifier.weight(1f))
         if (line != null) AnswerText(line, Modifier.padding(horizontal = M.gutter - M.m))
@@ -50,6 +69,69 @@ fun ItemScreen(items: List<ItemFact>, pick: String?, line: String?, index: Int, 
 }
 
 const val ITEM_PHOTO_TAG = "item-photo"
+
+@Composable
+private fun NearItems(items: List<ItemFact>, pick: String?, line: String?, index: Int, onIndex: (Int) -> Unit, onOpen: (ItemFact) -> Unit, modifier: Modifier,
+    stale: Boolean, onDirections: ((String) -> Unit)?) {
+    val ctx = LocalContext.current
+    val open = onDirections ?: { url: String -> runCatching { com.misura.phone.MisuraGraph.openDirections(ctx.applicationContext, url) }; Unit }
+    // Past the places age limit a card keeps its words only: no map, no Directions, no reason about the map.
+    val shown = if (stale) items.map { it.copy(lat = null, lng = null, noPin = null) } else items
+    val pinned = shown.filter { it.lat != null && it.lng != null }
+    val onPick = line != null && shown.any { it.id == pick }
+    Column(modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(M.p)) {
+        if (pinned.isNotEmpty())
+            PlaceMap(pinned.map { PlaceFact(it.id, it.title, lat = it.lat, lng = it.lng) }, shown.getOrNull(index)?.id, onTap = {},
+                onSelect = { id -> shown.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let(onIndex) },
+                modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(LocalRadii.current.card)))
+        else Spacer(Modifier.weight(1f))
+        if (line != null && !onPick) AnswerText(line, Modifier.padding(horizontal = M.gutter - M.m))
+        CardPager(shown.size, index, onIndex, "item") { i ->
+            val f = shown[i]
+            NearItemCard(f, f.id == pick, if (f.id == pick) line else null, { onOpen(items[i]) }, f.directionsUrl()?.let { url -> { open(url) } })
+        }
+    }
+}
+
+/** What a looked-up card without a pin says on its spare line. */
+fun noPinLine(why: String?): String? = when (why) {
+    com.misura.core.agent.NO_PIN_SHARED -> "Not on the map: more than one place has this name nearby."
+    com.misura.core.agent.NO_PIN_NONE -> "Not found on the map."
+    else -> null
+}
+
+/**
+ * A near-me app find's card (owner list item 7), text only and always the same height: title + PICK; "detail · distance · app" on one line;
+ * a spare line (Misura's [line] on the pick, else why the venue has no pin, else empty); Open in app, and Directions only with a pin.
+ * The buttons are the tap targets, not the card.
+ */
+@Composable
+fun NearItemCard(i: ItemFact, isPick: Boolean, line: String?, onOpen: () -> Unit, onDirections: (() -> Unit)?) = Column(
+    Modifier.fillMaxWidth().background(M.surface, RoundedCornerShape(LocalRadii.current.card)).padding(M.p),
+    verticalArrangement = Arrangement.spacedBy(M.p),
+) {
+    Column(Modifier.padding(horizontal = 6.u), verticalArrangement = Arrangement.spacedBy(3.u)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.u)) {
+            Text(i.title, style = T.who, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            // Same height with or without the tag (the title line sets it).
+            if (isPick) PickTag()
+        }
+        // The distance is said once: a detail that already shows it keeps it.
+        val meta = listOfNotNull(i.detail, i.distance?.takeIf { d -> i.detail?.contains(d) != true }, i.app).joinToString(" · ")
+        Text(meta, style = T.src, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.u)) {
+            if (line != null) Box(Modifier.padding(top = 6.u).size(6.u).background(M.orange, CircleShape))
+            Text(line ?: noPinLine(i.noPin).orEmpty(), style = T.line, minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
+    // Directions keeps its slot when there is no pin (an invisible, untappable stand-in), so both buttons wrap alike on every card and the
+    // cards stay the same height at any width or font size.
+    Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(M.gap)) {
+        MButton("Open in app", Kind.Forward, Modifier.weight(1.6f).fillMaxHeight(), onClick = onOpen)
+        if (onDirections != null) MButton("Directions", Kind.Secondary, Modifier.weight(1f).fillMaxHeight(), onClick = onDirections)
+        else Box(Modifier.weight(1f).alpha(0f).clearAndSetSemantics {}) { MButton("Directions", Kind.Secondary, Modifier.fillMaxWidth(), enabled = false) {} }
+    }
+}
 
 /**
  * Item card: photo slot ([photo]: the whole set has one), title, PICK + price, detail, the app it came from. The card is the tap target.

@@ -71,5 +71,5 @@ for _ in $(seq 1 30); do text=$(screen); [[ $text == *'"Remove"'* ]] && break; s
 tap Remove; sleep 4
 ask "List my routines";                           row 14 "Routine remove" "$(pass '[[ $text == *"0 routines"* ]]') $(echo "$text" | cut -c1-160)"
 a input keyevent KEYCODE_HOME
-echo; echo "Hand tasks 15–21: see docs/M0.md. Detail: detail.md" >> "$out"
+echo; echo "Hand tasks 15–25: see docs/M0.md. Detail: detail.md" >> "$out"
 cat "$out"

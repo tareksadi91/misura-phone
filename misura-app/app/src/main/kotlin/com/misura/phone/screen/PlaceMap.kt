@@ -41,11 +41,13 @@ private class MapHolder {
     var map: MapLibreMap? = null
     var pending: (() -> Unit)? = null
     var framedFor: List<String> = emptyList()
+    /** Marker id → place id, so a tap on a pin selects that place's card (item 7, Codex P2). */
+    val byMarker = mutableMapOf<Long, String>()
 }
 
 /**
  * MapLibre map: paper pins for options, orange for the card you're on (design-system §4 Map). Re-applied whenever the
- * places or the selection change. Tapping it calls [onTap] (full screen). TalkBack: "Select <name>" per place.
+ * places or the selection change. Tapping it calls [onTap] (full screen); tapping a pin selects its place ([onSelect]). TalkBack: "Select <name>" per place.
  */
 @Composable
 fun PlaceMap(places: List<PlaceFact>, selected: String?, onTap: () -> Unit, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
@@ -53,6 +55,7 @@ fun PlaceMap(places: List<PlaceFact>, selected: String?, onTap: () -> Unit, onSe
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val holder = remember { MapHolder() }
     val tap by rememberUpdatedState(onTap)
+    val select by rememberUpdatedState(onSelect)
     val pinned = places.filter { it.lat != null && it.lng != null }
     val view = remember {
         MapLibre.getInstance(ctx)
@@ -61,17 +64,20 @@ fun PlaceMap(places: List<PlaceFact>, selected: String?, onTap: () -> Unit, onSe
             getMapAsync { map ->
                 map.uiSettings.isAttributionEnabled = true; map.uiSettings.isLogoEnabled = false
                 map.addOnMapClickListener { tap(); true }
+                // A pin tap is the annotation's, not the map's: it selects that place and never opens the full map.
+                map.setOnMarkerClickListener { m -> holder.byMarker[m.id]?.let(select); true }
                 map.setStyle(MAP_STYLE) { style -> legible(style); holder.map = map; holder.pending?.invoke(); holder.pending = null }
             }
         }
     }
     val apply = {
         holder.map?.let { map ->
-            map.clear()
+            map.clear(); holder.byMarker.clear()
             val icons = IconFactory.getInstance(ctx)
             pinned.forEach { p ->
                 val on = p.id == selected
-                map.addMarker(MarkerOptions().position(LatLng(p.lat!!, p.lng!!)).title(p.label).icon(icons.fromBitmap(dot(if (on) M.orange.toArgb() else M.paper.toArgb(), if (on) 44 else 34))))
+                val m = map.addMarker(MarkerOptions().position(LatLng(p.lat!!, p.lng!!)).title(p.label).icon(icons.fromBitmap(dot(if (on) M.orange.toArgb() else M.paper.toArgb(), if (on) 44 else 34))))
+                holder.byMarker[m.id] = p.id
             }
             val ids = pinned.map { it.id }
             if (ids != holder.framedFor && pinned.isNotEmpty()) {

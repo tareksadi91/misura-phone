@@ -48,6 +48,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -176,11 +177,16 @@ private val NavSaver = Saver<Nav, String>(
  */
 @Composable
 fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openRequest: OpenRequest?, sends: Sends? = null, homeTap: Long = 0, voice: com.misura.phone.voice.Voice? = null,
-    apps: List<Pair<String, String>> = emptyList(), onOpenItem: ((ItemFact) -> Unit)? = null, appsProvider: () -> List<Pair<String, String>> = { apps }, onOpenSettings: (() -> Unit)? = null, openApp: (String) -> Unit = {}) {
+    apps: List<Pair<String, String>> = emptyList(), onOpenItem: ((ItemFact) -> Unit)? = null, appsProvider: () -> List<Pair<String, String>> = { apps }, onOpenSettings: (() -> Unit)? = null,
+    shortcutStore: com.misura.phone.shortcut.ShortcutStore? = null, openApp: (String) -> Unit = {}) {
     var openId by rememberSaveable { mutableStateOf<String?>(null) }
     var nav by rememberSaveable(stateSaver = NavSaver) { mutableStateOf(Nav()) }
     var open by remember { mutableStateOf<Open?>(null) }
     var rows by remember { mutableStateOf<List<Row>>(emptyList()) }
+    // Kept shortcuts, read in the same deferred poll as [rows], so a change never reflows Home under a sheet drag.
+    var shortcuts by remember { mutableStateOf<List<com.misura.core.shortcut.Shortcut>>(emptyList()) }
+    // A tapped shortcut is starting its task: a second tap before the task screen opens starts nothing.
+    var startingShortcut by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var text by rememberSaveable { mutableStateOf("") }
     var focused by remember { mutableStateOf(false) }
@@ -280,6 +286,12 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
                     val asked = firstText(sessions.turns(s.id)) ?: "Earlier task"
                     Row(s.id, homeLine(s, asked, stale = now - s.createdAt > PLACES_MAX_AGE_MS, sent = sent), kind, com.misura.core.agent.homeName(s, asked), com.misura.core.agent.onHome(s, now, kind))
                 }
+                // An unreadable list reads as empty in the store; anything else it throws keeps what Home already shows.
+                if (shortcutStore != null) {
+                    val kept = try { withContext(Dispatchers.IO) { shortcutStore.all() } } catch (_: com.misura.phone.store.StorageUnavailableException) { shortcuts }
+                    // A drag that began during the reads above waits too: the new lines come with the next poll after it.
+                    if (!sheet.moving) shortcuts = kept
+                }
             } else sessions.load(id)?.let { s ->
                 val turns = sessions.turns(id)
                 val stale = now - s.createdAt > PLACES_MAX_AGE_MS
@@ -306,6 +318,21 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
     }
 
     fun goHome() { openId = null; nav = Nav(); targetId = null; targetSession = null; cleared = false; earlier = false }
+    // A new task from your words: typed, spoken, or a kept shortcut's saved request (the same path, full tools).
+    suspend fun startTask(t: String) { val new = agent.start(t); openId = new; nav = Nav(); targetId = null; targetSession = null; cleared = false }
+    fun startShortcut(sc: com.misura.core.shortcut.Shortcut) {
+        if (startingShortcut || sheet.moving || sheet.engaged || sheet.searching || openId != null) return
+        startingShortcut = true
+        scope.launch {
+            try {
+                startTask(sc.prompt)
+                try { withContext(Dispatchers.IO) { shortcutStore?.used(sc.id, System.currentTimeMillis()) } }
+                catch (_: com.misura.phone.store.StorageUnavailableException) {} // the task runs; only its last-used time is lost
+            } finally { startingShortcut = false }
+        }
+    }
+    // Lines on Home (tasks that need you, kept shortcuts): no headline, a quieter texture, no first-use hint, and the field asks.
+    val homeHasLines = rows.any { it.visibleOnHome } || shortcuts.isNotEmpty()
     LaunchedEffect(homeTap) { if (homeTap != 0L) goHome() }
     // A task whose message went out is finished: nothing on it needs you (design-system §8 "done, then folds into home").
     val finished = open?.takeIf { it.s.id == openId }?.let { o -> (o.s.say as? Say.Approve)?.let { a -> !a.more && a.all.all { o.tasks[it]?.state in SENT } } } == true
@@ -324,7 +351,7 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
             if (requestKeyboard) detectTapGestures { requestIme.hide() }
         }) {
         HomeDecoration(sheet, listening && plainHome, { voice?.level ?: 0f }, atmosphereOf(
-            plainHome, earlier, requestKeyboard, listening, rows.any { it.visibleOnHome }, open?.takeIf { it.s.id == openId }, nav, openId != null))
+            plainHome, earlier, requestKeyboard, listening, homeHasLines, open?.takeIf { it.s.id == openId }, nav, openId != null))
         Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()
             .onGloballyPositioned { sheet.gestureOffset = it.positionInWindow() }
             .appSheetGesture(sheet, plainHome).padding(M.m), verticalArrangement = Arrangement.spacedBy(M.p)) {
@@ -359,9 +386,13 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
                     alpha = (1f - p / .45f).coerceIn(0f, 1f)
                     translationY = p * 130.dp.toPx()
                 }) {
-                    if (!requestKeyboard) Home(rows, now, Modifier.fillMaxSize(), onEarlier = { if (!sheet.searching) earlier = true }, onDismiss = { ids ->
+                    if (!requestKeyboard) Home(rows, now, Modifier.fillMaxSize(), shortcuts, onShortcut = { startShortcut(it) }, onRemoveShortcut = { sc ->
+                        // A failed write throws: the line springs back (SwipeTaskLine) and the shortcut stays kept.
+                        withContext(Dispatchers.IO) { shortcutStore?.remove(sc.id) }
+                        shortcuts = shortcuts.filter { it.id != sc.id }
+                    }, onEarlier = { if (!sheet.searching) earlier = true }, onDismiss = { ids ->
                         if (!sheet.searching) { ids.map { agent.dismiss(it) }.forEach { it.await() }; rows = rows.map { if (it.id in ids) it.copy(fresh = false) else it } }
-                    }, hint = { com.misura.phone.screen.FirstUseHints(sheet, !focused && !listening && rows.none { it.visibleOnHome }) }) {
+                    }, hint = { com.misura.phone.screen.FirstUseHints(sheet, !focused && !listening && !homeHasLines) }) {
                         if (!sheet.searching) { openId = it; nav = Nav() }
                     }
                 }
@@ -522,7 +553,7 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
             fun submit(t: String, note: Looking?) {
                 val id = openId
                 scope.launch {
-                    if (id == null || cleared || finished) { val new = agent.start(t); openId = new; nav = Nav(); targetId = null; targetSession = null; cleared = false }
+                    if (id == null || cleared || finished) startTask(t)
                     else agent.followUp(id, t, note)
                 }
             }
@@ -545,7 +576,7 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
             }
             // A phone with a side key has no talk button (his call, 15 Nov); the Listening sign in the field's place says it hears you.
             val sideKey = com.misura.phone.hidden.SideKey.seen
-            HomeInput(sheet, plainHome, text, onTextChange = { text = it }, listening = listening,
+            HomeInput(sheet, plainHome, plainHome && homeHasLines, text, onTextChange = { text = it }, listening = listening,
                 requestIme = if (animateRequest) requestIme else null,
                 level = { voice?.level ?: 0f }, fieldFocus = fieldFocus, onFocus = { isFocused ->
                     if (!(plainHome && sheet.searching) && isFocused && !focused) { targetId = lookingFront?.id; targetSession = openId; cleared = false }
@@ -635,7 +666,7 @@ private fun HomeDecoration(sheet: AppSheetState, listening: Boolean, level: () -
 
 /** Only this input leaf switches field mode and removes the home action, after release. */
 @Composable
-private fun HomeInput(sheet: AppSheetState, plainHome: Boolean, text: String, onTextChange: (String) -> Unit,
+private fun HomeInput(sheet: AppSheetState, plainHome: Boolean, homeHasLines: Boolean, text: String, onTextChange: (String) -> Unit,
     requestIme: androidx.compose.ui.platform.SoftwareKeyboardController?,
     listening: Boolean, level: () -> Float, fieldFocus: FocusRequester, onFocus: (Boolean) -> Unit,
     openFirstApp: () -> Unit, action: @Composable () -> Unit) {
@@ -650,7 +681,7 @@ private fun HomeInput(sheet: AppSheetState, plainHome: Boolean, text: String, on
             val fieldKeyboard = if (sheet.engaged) sheet.keyboard else requestIme ?: LocalSoftwareKeyboardController.current
             CompositionLocalProvider(LocalSoftwareKeyboardController provides fieldKeyboard) {
                 Field(if (searchingApps) sheet.typed else text,
-                    { if (searchingApps) sheet.typed = it else onTextChange(it) }, if (searchingApps) "Search apps" else "Type a request…",
+                    { if (searchingApps) sheet.typed = it else onTextChange(it) }, homePlaceholder(searchingApps, homeHasLines),
                     Modifier.alpha(if (listening) 0f else 1f)
                         .focusRequester(fieldFocus).focusRequester(sheet.fieldFocus)
                         .onFocusChanged { onFocus(it.isFocused) }.pointerInput(searchingApps, requestIme) {
@@ -681,6 +712,13 @@ private fun HomeInput(sheet: AppSheetState, plainHome: Boolean, text: String, on
         }
         if (!searchingApps) action()
     }
+}
+
+/** The request field's placeholder: Home with lines on it asks (the headline has gone); empty Home invites typing. */
+internal fun homePlaceholder(searchingApps: Boolean, homeHasLines: Boolean): String = when {
+    searchingApps -> "Search apps"
+    homeHasLines -> ASK_FIELD
+    else -> "Type a request…"
 }
 
 private val SENDING = setOf(TaskState.EXECUTING, TaskState.CHECKING)
@@ -745,7 +783,8 @@ const val EARLIER = "Earlier ›"
  * tasks are behind "Earlier". [onEarlier] = null: a plain list, no signs.
  */
 @Composable
-private fun Home(rows: List<Row>, now: Long, modifier: Modifier, onEarlier: (() -> Unit)? = null, onDismiss: suspend (List<String>) -> Unit = {},
+private fun Home(rows: List<Row>, now: Long, modifier: Modifier, shortcuts: List<com.misura.core.shortcut.Shortcut> = emptyList(),
+    onShortcut: (com.misura.core.shortcut.Shortcut) -> Unit = {}, onRemoveShortcut: suspend (com.misura.core.shortcut.Shortcut) -> Unit = {}, onEarlier: (() -> Unit)? = null, onDismiss: suspend (List<String>) -> Unit = {},
     hint: @Composable () -> Unit = {}, onOpen: (String) -> Unit) = androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxWidth()) {
     val density = LocalDensity.current
     val measure = androidx.compose.ui.text.rememberTextMeasurer(cacheSize = 16)
@@ -767,10 +806,12 @@ private fun Home(rows: List<Row>, now: Long, modifier: Modifier, onEarlier: (() 
     val earlierReserve = if (rows.isEmpty()) 0.dp else maxOf(48.dp,
         heightOf(if (allOpen > 0) "Earlier · $allOpen still open ›" else EARLIER, ST.nav) + 32.dp)
     val rowHeight = maxOf(48.dp, (yoursAll + failedAll).map { heightOf(it.name, ST.step, 1) }
+        .plus(shortcuts.map { heightOf(it.title, ST.step, 1) })
         .plus(heightOf(runningName, ST.step, 1)).maxOrNull()!! + 24.dp)
     val cueHeight = maxOf(14.u, heightOf("Swipe down for apps", ST.date,
         width = (contentWidth - with(density) { 22.u.roundToPx() }).coerceAtLeast(1)))
-    val tail = earlierReserve + if (open.isEmpty()) cueHeight else rowHeight
+    // A kept shortcut is a line too: the clock and date give way before the only line does.
+    val tail = earlierReserve + if (open.isEmpty() && shortcuts.isEmpty()) cueHeight else rowHeight
     val dateHeight = heightOf(date, ST.date)
     val clockHeight = 24.u + heightOf(time, ST.clock)
     val showDate = dateHeight + tail <= maxHeight
@@ -778,11 +819,14 @@ private fun Home(rows: List<Row>, now: Long, modifier: Modifier, onEarlier: (() 
     val header = (if (showDate) dateHeight else 0.dp) + (if (showClock) clockHeight else 0.dp)
     // Reserve Earlier before fitting task lines; no extra home scroll competes with the accepted sheet drag.
     val slots = ((maxHeight - header - earlierReserve).value / rowHeight.value).toInt().coerceAtLeast(0)
-    val yours = yoursAll.take(slots)
-    val failed = failedAll.take((slots - yours.size).coerceAtLeast(0))
-    val showRunning = slots > yours.size + failed.size && running.isNotEmpty()
+    // At most four lines, tasks first (yours, failed, running), then shortcuts in the order they were kept (spec Home 5).
+    val fit = com.misura.core.shortcut.homeFit(yoursAll.size, failedAll.size, running.size, shortcuts.size, slots)
+    val yours = yoursAll.take(fit.yours)
+    val failed = failedAll.take(fit.failed)
+    val showRunning = fit.running
+    val shownShortcuts = shortcuts.take(fit.shortcuts)
     val hidden = allOpen - yours.size - failed.size - if (showRunning) running.size else 0
-    val headlineFits = open.isEmpty() && maxHeight - header - earlierReserve >= heightOf("What should we do?", ST.home) + 24.u + cueHeight
+    val headlineFits = open.isEmpty() && shortcuts.isEmpty() && maxHeight - header - earlierReserve >= heightOf("What should we do?", ST.home) + 24.u + cueHeight
     Column(Modifier.fillMaxSize().padding(horizontal = M.gutter - M.m)) {
         if (showClock) Text(time, style = ST.clock, modifier = Modifier.padding(top = 24.u))
         if (showDate) Text(date, style = ST.date)
@@ -795,10 +839,24 @@ private fun Home(rows: List<Row>, now: Long, modifier: Modifier, onEarlier: (() 
             if (showRunning && running.size == 1) key(running[0].id) { TaskLine(runningName, "$runningName, working", { com.misura.phone.screen.WorkingDot() }, onRemove = { onDismiss(listOf(running[0].id)) }) { onOpen(running[0].id) } }
             else if (showRunning) key(running.map { it.id }) { TaskLine(runningName, sign = { com.misura.phone.screen.WorkingDot() },
                 onRemove = { onDismiss(running.map { it.id }) }, onClick = onEarlier) }
+            shownShortcuts.forEach { sc -> key("shortcut:" + sc.id) { TaskLine(sc.title, "${sc.title}, shortcut", { ShortcutSign(sc.app) }, action = "Remove",
+                onRemove = { onRemoveShortcut(sc) }) { onShortcut(sc) } } }
             if (rows.isNotEmpty()) Text(if (hidden > 0) "Earlier · $hidden still open ›" else EARLIER, style = ST.nav, color = if (hidden > 0) M.text else M.text2,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = "Earlier tasks", onClick = onEarlier).padding(vertical = 16.dp))
         }
     }
+}
+
+/** A shortcut's sign: its app's one-colour mark in text-2, else the line icon a step in that app shows. 16 u, centred on the 14 u sign column. */
+@Composable
+private fun ShortcutSign(app: String?) = Box(Modifier.requiredSize(16.u), contentAlignment = androidx.compose.ui.Alignment.Center) {
+    val mark = app?.let { com.misura.phone.screen.rememberAppMark(it) }
+    if (mark != null) androidx.compose.foundation.Image(mark, null, Modifier.size(16.u), colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(M.text2))
+    else com.misura.phone.screen.LineIcon(when (app) {
+        com.misura.core.agent.WEB -> com.misura.phone.screen.Icon.Search
+        com.misura.core.agent.NOTE -> com.misura.phone.screen.Icon.Note
+        else -> com.misura.phone.screen.Icon.Pin
+    })
 }
 
 /** One tappable line of screen text, with its sign in front when it has one. Opens, never commits. */

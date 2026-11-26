@@ -36,6 +36,8 @@ object MisuraGraph {
     lateinit var controller: Controller; private set
     lateinit var router: Router; private set
     lateinit var agent: Agent; private set
+    /** Kept Home shortcuts: one store, shared by the shortcut tool and Home. */
+    lateinit var shortcuts: com.misura.phone.shortcut.ShortcutStore; private set
     private lateinit var credentials: com.misura.phone.setup.CredentialSettings
     /** Place photos sized for the 3a's cards. */
     val photoLoader: com.misura.phone.screen.PhotoLoader = { place, photo ->
@@ -107,7 +109,8 @@ object MisuraGraph {
             runNow = { r -> com.misura.phone.routine.Routines.run(r, manual = true) }, launch = { work -> scope.launch { work() } })
         val appLabel = { pkg: String -> runCatching { app.packageManager.getApplicationLabel(app.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg) }
         // Steps as Home shows them (a send follows its task), so only a confirmed send counts as a run that worked.
-        val shortcutTool = com.misura.phone.shortcut.ShortcutTool(com.misura.phone.shortcut.ShortcutStore(app),
+        shortcuts = com.misura.phone.shortcut.ShortcutStore(app)
+        val shortcutTool = com.misura.phone.shortcut.ShortcutTool(shortcuts,
             com.misura.phone.shortcut.controllerSteps(sessions, tasks::load, controller::isChecking), appLabel)
         val gates = CardGates(GateOwner(calendar::answered, calendar::stopped), GateOwner(routineTool::answered, routineTool::stopped, routineTool::outcome),
             GateOwner(shortcutTool::answered, shortcutTool::stopped, shortcutTool::outcome), GateOwner(useApp::answered, useApp::stopped))

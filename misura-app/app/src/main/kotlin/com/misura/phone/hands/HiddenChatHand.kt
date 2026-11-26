@@ -72,7 +72,7 @@ class HiddenChatHand(
             // Written synchronously before the tap, so a crash right after the tap still leaves it.
             baselines.edit().putInt(attemptId, before).commit()
             val b = send.bounds
-            if (!input.tap(s, (b[0] + b[2]) / 2, (b[1] + b[3]) / 2)) return@session HandResult.Uncertain("send tap not confirmed")
+            if (input.tap(s, (b[0] + b[2]) / 2, (b[1] + b[3]) / 2) != true) return@session HandResult.Uncertain("send tap not confirmed")
             repeat(30) {
                 reader.read(s)?.let { if (shown(it, text) > before) return@session HandResult.Ok("message \"$text\" shown in $recipient chat") }
                 delay(100)

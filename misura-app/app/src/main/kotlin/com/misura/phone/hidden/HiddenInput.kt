@@ -13,7 +13,8 @@ import kotlin.coroutines.resume
 
 /** Taps and types on the hidden display only. Typing sets the field's text directly, so no keyboard opens. */
 object HiddenInput {
-    suspend fun tap(s: DisplaySession, x: Int, y: Int): Boolean {
+    /** True = done, false = not done, null = taken but never confirmed: it may have landed. */
+    suspend fun tap(s: DisplaySession, x: Int, y: Int): Boolean? {
         require(s.displayId != 0) { "display 0 is the main screen" }
         val svc = MisuraAccessibility.instance ?: return false
         val g = GestureDescription.Builder().setDisplayId(s.displayId)
@@ -47,7 +48,8 @@ object HiddenInput {
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
     }
 
-    suspend fun swipe(s: DisplaySession, x1: Int, y1: Int, x2: Int, y2: Int): Boolean {
+    /** As [tap]: null = never confirmed. */
+    suspend fun swipe(s: DisplaySession, x1: Int, y1: Int, x2: Int, y2: Int): Boolean? {
         require(s.displayId != 0) { "display 0 is the main screen" }
         val svc = MisuraAccessibility.instance ?: return false
         val path = Path().apply { moveTo(x1.toFloat(), y1.toFloat()); lineTo(x2.toFloat(), y2.toFloat()) }
@@ -61,10 +63,10 @@ object HiddenInput {
 
     /**
      * Sends [g] and waits for the system's answer, at most [durationMs] + [GESTURE_GRACE_MS]. On the phone (26 Nov) an answer never came
-     * and the hand waited, holding what it had recorded, until the run's outer limit stopped it with nothing. A lost answer counts as not
-     * gone through: the model sees the tap failed and looks again.
+     * and the hand waited, holding what it had recorded, until the run's outer limit stopped it with nothing. A lost answer is null, not
+     * false: the gesture may have landed, so the caller looks before doing it again (Codex review).
      */
-    private suspend fun gesture(svc: AccessibilityService, g: GestureDescription, durationMs: Long): Boolean =
+    private suspend fun gesture(svc: AccessibilityService, g: GestureDescription, durationMs: Long): Boolean? =
         withTimeoutOrNull(durationMs + GESTURE_GRACE_MS) {
             suspendCancellableCoroutine { c ->
                 val sent = send(svc, g, object : AccessibilityService.GestureResultCallback() {
@@ -73,7 +75,7 @@ object HiddenInput {
                 })
                 if (!sent && c.isActive) c.resume(false)
             }
-        } ?: false.also { Log.w("MisuraAgent", "gesture: no answer from the system in ${durationMs + GESTURE_GRACE_MS} ms; counted as not gone through") }
+        } ?: null.also { Log.w("MisuraAgent", "gesture: no answer from the system in ${durationMs + GESTURE_GRACE_MS} ms; outcome unknown") }
 
     internal const val GESTURE_GRACE_MS = 3_000L
 }

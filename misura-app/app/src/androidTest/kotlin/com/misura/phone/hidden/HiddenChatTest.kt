@@ -415,7 +415,7 @@ class HiddenChatTest {
 
     /**
      * Phone 26 Nov: the system took a tap and never answered it; the hand waited until the run's outer limit stopped it, and the gyms it had
-     * recorded were lost. A tap with no answer now fails that tap only: the run goes on, ends on its own budget and keeps what it recorded.
+     * recorded were lost. A tap with no answer is now "may have landed, look first" (Codex review): the run goes on, ends on its own budget and keeps what it recorded.
      */
     @Test fun aTapTheSystemNeverAnswersFailsThatTapAndTheRunKeepsWhatItRecorded(): Unit = runBlocking {
         val real = HiddenInput.send; var sent = 0
@@ -429,7 +429,7 @@ class HiddenChatTest {
             val r = hand.run(goal())
             prim(r, "error")!!.lineSequence().first() shouldBe "took too long"
             itemsOf(r).map { prim(it, "title") } shouldBe listOf("Blue lamp")
-            check(told.drop(1).any { "did not go through" in it }) { told.lastOrNull().orEmpty() }
+            check(told.drop(1).any { "did not confirm it, so it may have landed" in it }) { told.lastOrNull().orEmpty() }
             check((System.nanoTime() - t0) / 1_000_000 < 10_000 + HiddenInput.GESTURE_GRACE_MS + 5_000) { "ran ${(System.nanoTime() - t0) / 1_000_000} ms" }
         } finally { HiddenInput.send = real }
     }

@@ -696,7 +696,12 @@ class UseApp(
                     // Taken away from the tools, but a model can still name it: refused here too, nothing swiped.
                     if (up in stuck) return "not done: scrolling ${if (up) "up" else "down"} moved nothing on this screen; try ${if (stuck.size == 2) "search" else if (up) "down, search" else "up, search"} or back, or call done if the answer is on screen"
                     // Only a swipe that went through can prove "nothing moved"; a rejected one must not take the direction away (Codex re-check).
-                    if (!HiddenInput.swipe(s, W / 2, if (up) H / 3 else H * 2 / 3, W / 2, if (up) H * 2 / 3 else H / 3)) return "scroll ${if (up) "up" else "down"} did not go through"
+                    // An unconfirmed swipe proves nothing either way: no "nothing moved" from it, and the model looks before scrolling on.
+                    when (HiddenInput.swipe(s, W / 2, if (up) H / 3 else H * 2 / 3, W / 2, if (up) H * 2 / 3 else H / 3)) {
+                        false -> return "scroll ${if (up) "up" else "down"} did not go through"
+                        null -> return "scroll ${if (up) "up" else "down"}: Android did not confirm it, so the page may have moved. Look at the screen before scrolling again"
+                        true -> Unit
+                    }
                     if (!up && things.isNotEmpty()) near?.let { it.resultScrolls++ }
                     scrolledFrom = before; scrolledUp = up; return "scrolled ${if (up) "up" else "down"}"
                 }
@@ -730,8 +735,10 @@ class UseApp(
                     val earlier = tappedAt[key].orEmpty()
                     if (earlier.size >= 2 && refused.add(key)) { repeats++; return "not made: the third same tap on ${e.line} on a same-looking screen (steps ${earlier.joinToString(" and ")}); it changed nothing. Do something else: record what the list shows (a condition you can't see stays unverified), go back, or call done or fail. Only if this tap really makes progress the screen doesn't show, make it again" }
                     if (label != null) when (val g = gated(label, e, "tap “${cardWords(label)}”")) { null -> Unit; else -> return g }
-                    if (!HiddenInput.tap(s, x, y)) return "tap on ${e.line} did not go through"
-                    tappedAt[key] = earlier + (did.size + 1)
+                    val went = HiddenInput.tap(s, x, y)
+                    if (went == false) return "tap on ${e.line} did not go through"
+                    tappedAt[key] = earlier + (did.size + 1) // an unconfirmed tap may have landed: it counts as made
+                    if (went == null) return "tap on ${e.line}: Android did not confirm it, so it may have landed. Look at the screen before tapping again"
                     val before = earlier.firstOrNull() ?: return "tapped ${e.line}"
                     repeats++
                     return "tapped ${e.line}; you made the same tap on a same-looking screen at step $before. If it did not help then, try another route instead of repeating it"

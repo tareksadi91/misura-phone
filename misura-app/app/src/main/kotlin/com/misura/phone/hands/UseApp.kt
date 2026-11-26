@@ -699,7 +699,7 @@ class UseApp(
                     // An unconfirmed swipe proves nothing either way: no "nothing moved" from it, and the model looks before scrolling on.
                     when (HiddenInput.swipe(s, W / 2, if (up) H / 3 else H * 2 / 3, W / 2, if (up) H * 2 / 3 else H / 3)) {
                         false -> return "scroll ${if (up) "up" else "down"} did not go through"
-                        null -> return "scroll ${if (up) "up" else "down"}: Android did not confirm it, so the page may have moved. Look at the screen before scrolling again"
+                        null -> return "scroll ${if (up) "up" else "down"}: $UNCONFIRMED, so the page may have moved. Look at the screen before scrolling again"
                         true -> Unit
                     }
                     if (!up && things.isNotEmpty()) near?.let { it.resultScrolls++ }
@@ -738,7 +738,7 @@ class UseApp(
                     val went = HiddenInput.tap(s, x, y)
                     if (went == false) return "tap on ${e.line} did not go through"
                     tappedAt[key] = earlier + (did.size + 1) // an unconfirmed tap may have landed: it counts as made
-                    if (went == null) return "tap on ${e.line}: Android did not confirm it, so it may have landed. Look at the screen before tapping again"
+                    if (went == null) return "tap on ${e.line}: $UNCONFIRMED, so it may have landed. Look at the screen before tapping again"
                     val before = earlier.firstOrNull() ?: return "tapped ${e.line}"
                     repeats++
                     return "tapped ${e.line}; you made the same tap on a same-looking screen at step $before. If it did not help then, try another route instead of repeating it"
@@ -813,7 +813,7 @@ class UseApp(
                 }
                 log("use_app $pkg #${did.size + 1}: ${if (ACTIONS.any { it.name == c.name } || c.name == "area") c.name else "unknown"} screen=${screenMs}ms model=${modelMs}ms act=${ms(t2)}ms nodes=$nodes lines=${seen.size}$tok$split recorded=${things.size}/${count ?: 0}") // never the arguments: typed text and found facts stay out of logs
                 did += "${did.size + 1}. $note"
-                if (batched && queue.isNotEmpty() && STEP_OK.none { note.startsWith(it) }) stopSteps("step $stepNo did not go through")
+                if (batched && queue.isNotEmpty() && STEP_OK.none { note.startsWith(it) }) stopSteps(if (UNCONFIRMED in note) "step $stepNo was not confirmed: it may have landed" else "step $stepNo did not go through")
                 if (c.name == "item") enough(words.size)?.let { return it }
                 backed = c.name == "key" && c.args.str("name") == "back"
                 // A round that only recorded or noted leaves the screen as it was: no pause (unless it scrolled a cut-off one into view).
@@ -980,6 +980,8 @@ class UseApp(
         const val NUDGE = "If the goal is to find or compare things: once the category for the kind of thing is set (or the app has none for it), record the things on this screen now with item. Don't look for more filters or reopen one that didn't change. A condition you can't see on a thing stays unverified: record it and say so in detail."
         private const val TOO_LATE = "\u0000too late"
         const val CUT_OFF = "the picture of that one is cut off; scroll so it is fully on screen, then record it again"
+        /** A gesture Android took but never confirmed (HiddenInput null): it may have landed. */
+        private const val UNCONFIRMED = "Android did not confirm it"
         private const val SAFETY_MS = 30_000L; private const val MAX_ITEMS = 10; private const val PIN_MAX = 5; internal const val MAX_COLLECT = MAX_ITEMS; internal const val RESULT_SCROLLS = 6; private const val WEEK_MS = 7 * 24 * 3600 * 1000L
     }
 }

@@ -39,6 +39,10 @@ IDENTIFIER_WORD_LIMIT = 8
 # Reviewed complete source lines, including DEBUG guards for content-bearing logs.
 # New/changed logging needs review; this is a finite sink check, not Kotlin dataflow analysis.
 REVIEWED_LOG_LINES = {
+    # A lost gesture answer: a fixed sentence and a duration, no screen words (26 Nov).
+    "misura-app/app/src/main/kotlin/com/misura/phone/hidden/HiddenInput.kt": {
+        "2498a05851b5b30cd4c56717d2bc217adad8a105a459b4d61b78010efb9ddef1",
+    },
     "misura-app/app/src/main/kotlin/com/misura/phone/store/RoomStores.kt": {
         "abb09f9daa601340cb40598df4c2faecef585d89a118cf84c0671ec55e894d30",
     },

@@ -416,8 +416,13 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
                                     }
                                 }
                             }
-                            items.isNotEmpty() -> ItemScreen(items, o.s.items?.pick, (say as? Say.Answer)?.line, nav.index, { nav = nav.select(it) }, onOpenItem ?: { item: ItemFact -> agent.openItem(o.s.id, item); Unit }, stale = o.stale,
-                                you = com.misura.phone.hands.NearYou.at(o.s.id, items.map { it.id }))
+                            items.isNotEmpty() -> {
+                                // The "you" dot follows the screen's clock tick (now), so it goes when it turns an hour old while the screen stays open;
+                                // derived, so the map only hears of it when the dot itself changes, not on every tick.
+                                val ids = items.map { it.id }
+                                val you by remember(o.s.id, ids) { derivedStateOf { now; com.misura.phone.hands.NearYou.at(o.s.id, ids) } }
+                                ItemScreen(items, o.s.items?.pick, (say as? Say.Answer)?.line, nav.index, { nav = nav.select(it) }, onOpenItem ?: { item: ItemFact -> agent.openItem(o.s.id, item); Unit }, stale = o.stale, you = you)
+                            }
                         }
                     }
                 }

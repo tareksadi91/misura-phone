@@ -10,14 +10,16 @@ object NearYou {
     const val MAX_AGE_MS = 60 * 60_000L
     private class Kept(val at: Pair<Double, Double>, val ids: Set<String>, val nanos: Long)
     private val kept = java.util.concurrent.ConcurrentHashMap<String, Kept>()
+    /** Time since boot, deep sleep included (System.nanoTime stops while the phone sleeps: an hour asleep would not count, Codex P2). Tests set it. */
+    @Volatile internal var clock: () -> Long = { android.os.SystemClock.elapsedRealtimeNanos() }
 
     /** A near run of [session] ended with [ids] found at fix [at]; no fix or nothing found drops what the session had. */
-    fun keep(session: String, at: Pair<Double, Double>?, ids: List<String>, nanos: Long = System.nanoTime()) {
+    fun keep(session: String, at: Pair<Double, Double>?, ids: List<String>, nanos: Long = clock()) {
         if (at == null || ids.isEmpty()) kept.remove(session) else kept[session] = Kept(at, ids.toSet(), nanos)
     }
 
     /** Where to draw "you" for [session]'s set [ids]: only the run that found exactly these things, kept within the last hour. */
-    fun at(session: String, ids: Collection<String>, nanos: Long = System.nanoTime()): Pair<Double, Double>? {
+    fun at(session: String, ids: Collection<String>, nanos: Long = clock()): Pair<Double, Double>? {
         val k = kept[session] ?: return null
         if (nanos - k.nanos !in 0..MAX_AGE_MS * 1_000_000) { kept.remove(session, k); return null }
         return k.at.takeIf { ids.isNotEmpty() && k.ids.containsAll(ids) }

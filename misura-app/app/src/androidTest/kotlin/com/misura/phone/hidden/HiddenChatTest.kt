@@ -1493,20 +1493,18 @@ class HiddenChatTest {
     }
 
     /**
-     * "Nearest" only from the app's own distance order (owner 26 Nov): on the Gyms page sorted by distance (the hand taps the app's
-     * "Sort: distance"), the recorded distances never go down, so the result says the first is the nearest the app has; the default
-     * order keeps "nearest first among those checked". Red on the prior source: no such order line.
+     * The hand may use the app's own distance sort (owner 26 Nov: start at the user), but the answer's claim stays modest: rising distances in what
+     * was recorded don't prove the app sorted them (Codex review 26 Nov), so even on the sorted Gyms page the order is "nearest first … among
+     * those checked", never "the nearest the app has". Red on the prior commit: it said the first was the nearest the app has.
      */
-    @Test fun aNearRunOnTheAppsDistanceSortSaysTheFirstIsTheNearestItHas(): Unit = runBlocking {
+    @Test fun onTheAppsDistanceSortTheNearestIsStillOnlyAmongThoseChecked(): Unit = runBlocking {
         val prompts = mutableListOf<String>()
         val r = mk(gymsBrain(prompts, onePerScreen = false, sort = true), maxActions = 20, filesDir = ctx.filesDir, whereNow = { "Munich" }).run(goal("near_user" to true, "count" to 1))
         check(r["error"] == null) { "$r\n${prompts.lastOrNull()}" }
         fun JsonObject.s(k: String) = (this[k] as? kotlinx.serialization.json.JsonPrimitive)?.content
-        r.s("order") shouldBe com.misura.phone.hands.UseApp.BY_DISTANCE
-        (itemsOf(r).first().s("title")) shouldBe "Gym Last" // 0.2 km: last in the app's default order, past where a capped run looks
-        // The same app without its sort: the nearest among those checked, never the nearest it has.
-        val unsorted = mk(gymsBrain(mutableListOf(), onePerScreen = false), maxActions = 20, filesDir = ctx.filesDir, whereNow = { "Munich" }).run(goal("near_user" to true, "count" to 1))
-        check(unsorted.s("order")?.startsWith("nearest first") == true) { unsorted.toString() }
+        check(r.s("order")?.startsWith("nearest first by the distance the app shows, among the") == true) { r.toString() }
+        check("nearest it has" !in r.toString()) { r.toString() }
+        (itemsOf(r).first().s("title")) shouldBe "Gym Last" // the sort was used: 0.2 km, last in the app's default order, past where a capped run looks
     }
 
     /**
@@ -1708,13 +1706,18 @@ class HiddenChatTest {
     private fun grantButton(display: Int): Pair<Int, Int>? {
         val ui = inst.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
         ui.serviceInfo = ui.serviceInfo.apply { flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS }
+        // By the permission controller's own view ids (AOSP and Google builds), so any language works; the English labels only as a fallback.
+        val ids = listOf("permission_allow_foreground_only_button", "permission_allow_one_time_button", "permission_allow_button")
+            .flatMap { b -> listOf("com.android.permissioncontroller:id/$b", "com.google.android.permissioncontroller:id/$b") }
         val grant = Regex("(?i)^(while using the app|only this time|allow)$")
-        fun find(n: android.view.accessibility.AccessibilityNodeInfo?): android.view.accessibility.AccessibilityNodeInfo? {
+        fun find(n: android.view.accessibility.AccessibilityNodeInfo?, byId: Boolean): android.view.accessibility.AccessibilityNodeInfo? {
             n ?: return null
-            if (n.isClickable && (grant.matches(n.text?.toString().orEmpty()) || (0 until n.childCount).any { grant.matches(n.getChild(it)?.text?.toString().orEmpty()) })) return n
-            return (0 until n.childCount).firstNotNullOfOrNull { find(n.getChild(it)) }
+            if (n.isClickable && (if (byId) n.viewIdResourceName in ids
+                    else grant.matches(n.text?.toString().orEmpty()) || (0 until n.childCount).any { grant.matches(n.getChild(it)?.text?.toString().orEmpty()) })) return n
+            return (0 until n.childCount).firstNotNullOfOrNull { find(n.getChild(it), byId) }
         }
-        val b = ui.windowsOnAllDisplays.get(display).orEmpty().firstNotNullOfOrNull { find(it.root) } ?: return null
+        val roots = ui.windowsOnAllDisplays.get(display).orEmpty().mapNotNull { it.root }
+        val b = roots.firstNotNullOfOrNull { find(it, byId = true) } ?: roots.firstNotNullOfOrNull { find(it, byId = false) } ?: return null
         val r = android.graphics.Rect().also { b.getBoundsInScreen(it) }
         return r.centerX() to r.centerY()
     }

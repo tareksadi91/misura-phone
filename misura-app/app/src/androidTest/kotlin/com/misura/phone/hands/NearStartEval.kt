@@ -76,7 +76,7 @@ class NearStartEval {
             val first = (r?.get("items") as? JsonArray)?.firstOrNull() as? JsonObject
             val granted = ctx.packageManager.checkPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION, pkg) == android.content.pm.PackageManager.PERMISSION_GRANTED
             Log.i("MisuraEval", "NEAR ${if (old) "prior" else "new"} run=${k + 1} s=${(System.currentTimeMillis() - t0) / 1000} first=${first?.get("title")} ${first?.get("distance")} " +
-                "byAppDistance=${(r?.get("order") as? JsonPrimitive)?.content == UseApp.BY_DISTANCE} items=${(r?.get("items") as? JsonArray)?.size ?: 0} permissionGranted=$granted error=${r?.get("error") != null}")
+                "gymLastFirst=${first?.get("title")?.toString() == "\"Gym Last\""} items=${(r?.get("items") as? JsonArray)?.size ?: 0} permissionGranted=$granted error=${r?.get("error") != null}")
         }
     }
 }

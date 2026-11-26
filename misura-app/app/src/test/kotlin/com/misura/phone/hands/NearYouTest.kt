@@ -27,4 +27,17 @@ class NearYouTest {
         assertNull(NearYou.at("s3", listOf("a"), nanos = 5))
         assertEquals(1.0 to 2.0, NearYou.at("s3", listOf("c"), nanos = 5))
     }
+
+    /** keep and at run on the injected clock (production: elapsedRealtimeNanos, which counts deep sleep; System.nanoTime does not). */
+    @Test fun theDotsHourIsCountedOnTheInjectedSinceBootClock() {
+        val old = NearYou.clock
+        var t = 5 * hour
+        NearYou.clock = { t }
+        try {
+            NearYou.keep("s4", at, listOf("a"))
+            assertEquals(at, NearYou.at("s4", listOf("a")))
+            t += hour + 1 // an hour passed (asleep or not)
+            assertNull(NearYou.at("s4", listOf("a")))
+        } finally { NearYou.clock = old }
+    }
 }

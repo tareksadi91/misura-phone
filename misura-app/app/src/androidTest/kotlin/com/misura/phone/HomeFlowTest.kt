@@ -22,6 +22,8 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.performSemanticsAction
+import com.misura.phone.cards.u
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.StateRestorationTester
@@ -1215,5 +1217,31 @@ class HomeFlowTest {
         ask("is it still there?"); waitText("Yes, still there")
         brain.seen.last().last().toString() shouldContain "(Looking at: item id i1)"
         brain.seen.last().last().toString().contains("Blue jacket") shouldBe false
+    }
+
+    /** Owner, 26 Nov: the Ask button was ~15 dp taller than the field, so the input row jumped when it appeared. */
+    @Test fun askButtonIsTheFieldsHeightSoTheRowDoesNotJump() {
+        home(Script())
+        rule.onNodeWithContentDescription(ASK_FIELD).performTextInput("A draft")
+        rule.waitUntil(5_000) { rule.onAllNodes(hasText("Ask")).fetchSemanticsNodes().isNotEmpty() }
+        val field = rule.onNodeWithContentDescription(ASK_FIELD).fetchSemanticsNode().boundsInRoot
+        val button = rule.onNode(hasText("Ask")).fetchSemanticsNode().boundsInRoot
+        // The field's semantics sit inside its 8.u padding: its outer box is that much taller on each side, and Ask must match the outer box.
+        val pad = with(rule.density) { 8.u.toPx() }
+        check(kotlin.math.abs(button.top - (field.top - pad)) < 1.5f && kotlin.math.abs(button.bottom - (field.bottom + pad)) < 1.5f) { "field $field (+$pad), Ask $button" }
+    }
+
+    /** Owner, 26 Nov: asking about an open place, the steps pushed its card down a step at a time; the "Working on" chip names it. */
+    @Test fun anOpenPlaceStepsAsideWhileMisuraWorksAndComesBackWithTheAnswer() {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        home(Script(find, show, { kotlinx.coroutines.runBlocking { gate.await() }; text("Friday 12–22")() })); ask("best bibimbap"); waitText("PICK")
+        rule.onNode(SemanticsMatcher("opens Namsan") { androidx.compose.ui.semantics.SemanticsActions.OnClick in it.config && it.config[androidx.compose.ui.semantics.SemanticsActions.OnClick].label == "Open Namsan" })
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
+        waitText("Directions")
+        ask("is it open Friday?")
+        waitText("is it open Friday?")
+        rule.onAllNodes(hasText("Directions")).assertCountEquals(0)
+        gate.complete(Unit)
+        waitText("Friday 12–22"); waitText("Directions")
     }
 }

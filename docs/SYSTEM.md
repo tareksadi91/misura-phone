@@ -162,6 +162,11 @@ This is the ordered to-do list for the sprint; it overrides the ordering below w
 - [ ] 7c. (found 26 Nov, Codex review of 7b, pre-existing) Two more waits have no deadline of their own: `ShizukuHiddenScreen.io` (global mutex) and the `NonCancellable` screen close in `UseApp.endRun`. Not seen on the phone; same symptom if one hangs (outer limit, items lost).
 - [ ] 7d. (found 26 Nov, merging #23) Flaky unit test: `LookUpTest.selectionAndGoogleAvailabilityMatrixDoesNotCrossAccounts` failed with a NullPointerException at the sourced answer (`LookUpTest.kt:105`) in 2 of 4 local runs of `:app:testDebugUnitTest`, against its local `TinyHttp` server; no near-me or hand change touches look-up. Find the race before trusting a red run of it.
 
+**Home shortcuts (owner, 24 Nov; spec `docs/superpowers/specs/2026-11-24-home-shortcuts-design.md`, plan `docs/superpowers/plans/2026-11-24-home-shortcuts.md`; Codex plan review + recheck 24 Nov, freshness audit vs `b86868f` 26 Nov: ready after fixes, no design changes):** a chore done once through Misura comes back as one tap on Home. Shortcuts are task lines (not cards), all white, under anything that needs you; at most 4 lines above Earlier, tasks included; no location or time logic.
+- [ ] 1a. (26 Nov, `home/shortcuts-1a`) Tell it: `shortcut` tool (tap-gated card Keep / Don't, gate prefix `sc:`, only after a run that worked), shortcut lines on Home, tap = typed request, swipe = Remove. M0 tasks 26–28.
+- [ ] 1b. It offers after three single-message runs of one app on three days (separate PR after 1a).
+- [ ] 2–4. Show it, widget, built apps: own plans later.
+
 **BYOK regression repair — Codex, 21 Nov:** Reopened after live failures. The agent called the progress-callback overload of a routed tool, which Kotlin delegated to its credential-free prototype. This skipped saved Exa credentials and made Places report missing Google sign-in. Both overloads now dispatch through the captured route. Existing offline adapter tests had bypassed this integration boundary.
 
 - [x] Reproduce and repair actual Agent → RouteTool → Exa/Places dispatch; preserve captured account/project and progress callback. Add regressions through the agent to sourced-answer and place-card state.

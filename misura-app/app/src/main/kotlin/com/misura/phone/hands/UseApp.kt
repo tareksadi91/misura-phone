@@ -734,7 +734,12 @@ class UseApp(
                     // Taken away from the tools, but a model can still name it: refused here too, nothing swiped.
                     if (up in stuck) return "not done: scrolling ${if (up) "up" else "down"} moved nothing on this screen; try ${if (stuck.size == 2) "search" else if (up) "down, search" else "up, search"} or back, or call done if the answer is on screen"
                     // Only a swipe that went through can prove "nothing moved"; a rejected one must not take the direction away (Codex re-check).
-                    if (!HiddenInput.swipe(s, W / 2, if (up) H / 3 else H * 2 / 3, W / 2, if (up) H * 2 / 3 else H / 3)) return "scroll ${if (up) "up" else "down"} did not go through"
+                    // An unconfirmed swipe proves nothing either way: no "nothing moved" from it, and the model looks before scrolling on.
+                    when (HiddenInput.swipe(s, W / 2, if (up) H / 3 else H * 2 / 3, W / 2, if (up) H * 2 / 3 else H / 3)) {
+                        false -> return "scroll ${if (up) "up" else "down"} did not go through"
+                        null -> return "scroll ${if (up) "up" else "down"}: $UNCONFIRMED, so the page may have moved. Look at the screen before scrolling again"
+                        true -> Unit
+                    }
                     if (!up && things.isNotEmpty()) near?.let { it.resultScrolls++ }
                     scrolledFrom = before; scrolledUp = up; return "scrolled ${if (up) "up" else "down"}"
                 }
@@ -768,8 +773,10 @@ class UseApp(
                     val earlier = tappedAt[key].orEmpty()
                     if (earlier.size >= 2 && refused.add(key)) { repeats++; return "not made: the third same tap on ${e.line} on a same-looking screen (steps ${earlier.joinToString(" and ")}); it changed nothing. Do something else: record what the list shows (a condition you can't see stays unverified), go back, or call done or fail. Only if this tap really makes progress the screen doesn't show, make it again" }
                     if (label != null) when (val g = gated(label, e, "tap “${cardWords(label)}”")) { null -> Unit; else -> return g }
-                    if (!HiddenInput.tap(s, x, y)) return if (ScreenReader.permissionQuestion(s.displayId)) PERMISSION_Q else "tap on ${e.line} did not go through"
-                    tappedAt[key] = earlier + (did.size + 1)
+                    val went = HiddenInput.tap(s, x, y)
+                    if (went == false) return if (ScreenReader.permissionQuestion(s.displayId)) PERMISSION_Q else "tap on ${e.line} did not go through"
+                    tappedAt[key] = earlier + (did.size + 1) // an unconfirmed tap may have landed: it counts as made
+                    if (went == null) return "tap on ${e.line}: $UNCONFIRMED, so it may have landed. Look at the screen before tapping again"
                     val before = earlier.firstOrNull() ?: return "tapped ${e.line}"
                     repeats++
                     return "tapped ${e.line}; you made the same tap on a same-looking screen at step $before. If it did not help then, try another route instead of repeating it"
@@ -845,7 +852,7 @@ class UseApp(
                 }
                 log("use_app $pkg #${did.size + 1}: ${if (ACTIONS.any { it.name == c.name } || c.name == "area") c.name else "unknown"} screen=${screenMs}ms model=${modelMs}ms act=${ms(t2)}ms nodes=$nodes lines=${seen.size}$tok$split recorded=${things.size}/${count ?: 0}") // never the arguments: typed text and found facts stay out of logs
                 did += "${did.size + 1}. $note"
-                if (batched && queue.isNotEmpty() && STEP_OK.none { note.startsWith(it) }) stopSteps("step $stepNo did not go through")
+                if (batched && queue.isNotEmpty() && STEP_OK.none { note.startsWith(it) }) stopSteps(if (UNCONFIRMED in note) "step $stepNo was not confirmed: it may have landed" else "step $stepNo did not go through")
                 if (c.name == "item") enough(words.size)?.let { return it }
                 backed = c.name == "key" && c.args.str("name") == "back"
                 // A round that only recorded or noted leaves the screen as it was: no pause (unless it scrolled a cut-off one into view).
@@ -1016,6 +1023,8 @@ class UseApp(
         /** What the hand is told when an action is refused because a permission question is up (only Back goes through there). */
         const val PERMISSION_Q = "not done: a permission question is on the screen. Misura never answers these; press back"
         const val CUT_OFF = "the picture of that one is cut off; scroll so it is fully on screen, then record it again"
+        /** A gesture Android took but never confirmed (HiddenInput null): it may have landed. */
+        private const val UNCONFIRMED = "Android did not confirm it"
         private const val SAFETY_MS = 30_000L; private const val MAX_ITEMS = 10; private const val PIN_MAX = 5; internal const val MAX_COLLECT = MAX_ITEMS; internal const val RESULT_SCROLLS = 6; private const val WEEK_MS = 7 * 24 * 3600 * 1000L
     }
 }

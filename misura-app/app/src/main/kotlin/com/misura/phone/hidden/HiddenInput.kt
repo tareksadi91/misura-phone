@@ -4,9 +4,11 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import android.os.Bundle
+import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
 /**
@@ -14,19 +16,14 @@ import kotlin.coroutines.resume
  * Nothing is done while a permission question is up there ([ScreenReader.permissionQuestion]): Misura never answers one; only Back closes it.
  */
 object HiddenInput {
-    suspend fun tap(s: DisplaySession, x: Int, y: Int): Boolean {
+    /** True = done, false = not done, null = taken but never confirmed: it may have landed. */
+    suspend fun tap(s: DisplaySession, x: Int, y: Int): Boolean? {
         require(s.displayId != 0) { "display 0 is the main screen" }
         if (ScreenReader.permissionQuestion(s.displayId)) return false
         val svc = MisuraAccessibility.instance ?: return false
         val g = GestureDescription.Builder().setDisplayId(s.displayId)
             .addStroke(GestureDescription.StrokeDescription(Path().apply { moveTo(x.toFloat(), y.toFloat()) }, 0, 60)).build()
-        return suspendCancellableCoroutine { c ->
-            val sent = svc.dispatchGesture(g, object : AccessibilityService.GestureResultCallback() {
-                override fun onCompleted(d: GestureDescription?) { if (c.isActive) c.resume(true) }
-                override fun onCancelled(d: GestureDescription?) { if (c.isActive) c.resume(false) }
-            }, null)
-            if (!sent && c.isActive) c.resume(false)
-        }
+        return gesture(svc, g, 60)
     }
 
     /** Sets an editable field's text, then reads it back; true only on an exact match. */
@@ -57,18 +54,35 @@ object HiddenInput {
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
     }
 
-    suspend fun swipe(s: DisplaySession, x1: Int, y1: Int, x2: Int, y2: Int): Boolean {
+    /** As [tap]: null = never confirmed. */
+    suspend fun swipe(s: DisplaySession, x1: Int, y1: Int, x2: Int, y2: Int): Boolean? {
         require(s.displayId != 0) { "display 0 is the main screen" }
         if (ScreenReader.permissionQuestion(s.displayId)) return false
         val svc = MisuraAccessibility.instance ?: return false
         val path = Path().apply { moveTo(x1.toFloat(), y1.toFloat()); lineTo(x2.toFloat(), y2.toFloat()) }
         val g = GestureDescription.Builder().setDisplayId(s.displayId).addStroke(GestureDescription.StrokeDescription(path, 0, 300)).build()
-        return suspendCancellableCoroutine { c ->
-            val sent = svc.dispatchGesture(g, object : AccessibilityService.GestureResultCallback() {
-                override fun onCompleted(d: GestureDescription?) { if (c.isActive) c.resume(true) }
-                override fun onCancelled(d: GestureDescription?) { if (c.isActive) c.resume(false) }
-            }, null)
-            if (!sent && c.isActive) c.resume(false)
-        }
+        return gesture(svc, g, 300)
     }
+
+    /** Hands a gesture to the system for [svc] (a seam: a test swaps it for one whose answer never comes). */
+    internal var send: (AccessibilityService, GestureDescription, AccessibilityService.GestureResultCallback) -> Boolean =
+        { svc, g, cb -> svc.dispatchGesture(g, cb, null) }
+
+    /**
+     * Sends [g] and waits for the system's answer, at most [durationMs] + [GESTURE_GRACE_MS]. On the phone (26 Nov) an answer never came
+     * and the hand waited, holding what it had recorded, until the run's outer limit stopped it with nothing. A lost answer is null, not
+     * false: the gesture may have landed, so the caller looks before doing it again (Codex review).
+     */
+    private suspend fun gesture(svc: AccessibilityService, g: GestureDescription, durationMs: Long): Boolean? =
+        withTimeoutOrNull(durationMs + GESTURE_GRACE_MS) {
+            suspendCancellableCoroutine { c ->
+                val sent = send(svc, g, object : AccessibilityService.GestureResultCallback() {
+                    override fun onCompleted(d: GestureDescription?) { if (c.isActive) c.resume(true) }
+                    override fun onCancelled(d: GestureDescription?) { if (c.isActive) c.resume(false) }
+                })
+                if (!sent && c.isActive) c.resume(false)
+            }
+        } ?: null.also { Log.w("MisuraAgent", "gesture: no answer from the system in ${durationMs + GESTURE_GRACE_MS} ms; outcome unknown") }
+
+    internal const val GESTURE_GRACE_MS = 3_000L
 }

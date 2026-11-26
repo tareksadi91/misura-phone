@@ -6,6 +6,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import com.misura.core.agent.ItemFact
@@ -41,26 +43,36 @@ fun ItemScreen(items: List<ItemFact>, pick: String?, line: String?, index: Int, 
     Column(modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(M.p)) {
         Spacer(Modifier.weight(1f))
         if (line != null) AnswerText(line, Modifier.padding(horizontal = M.gutter - M.m))
-        CardPager(items.size, index, onIndex, "item") { i -> ItemCard(items[i], items[i].id == pick) { onOpen(items[i]) } }
+        // All or nothing per set (owner, 25 Nov): one card without a photo means no card shows one, so the set stays even.
+        val photos = items.all { it.photo != null }
+        CardPager(items.size, index, onIndex, "item") { i -> ItemCard(items[i], items[i].id == pick, photos) { onOpen(items[i]) } }
     }
 }
 
-/** Item card: photo (only if it loads), title, PICK + price, detail, the app it came from. The card is the tap target. */
+const val ITEM_PHOTO_TAG = "item-photo"
+
+/**
+ * Item card: photo slot ([photo]: the whole set has one), title, PICK + price, detail, the app it came from. The card is the tap target.
+ * Every text slot keeps its height when empty, so cards in a set are the same height; a photo that doesn't load leaves its square empty.
+ */
 @Composable
-fun ItemCard(i: ItemFact, isPick: Boolean, onOpen: () -> Unit) = Column(
+fun ItemCard(i: ItemFact, isPick: Boolean, photo: Boolean = i.photo != null, onOpen: () -> Unit) = Column(
     Modifier.fillMaxWidth().background(M.surface, RoundedCornerShape(LocalRadii.current.card))
         .clickable(role = Role.Button, onClickLabel = "Open ${i.title}", onClick = onOpen).padding(M.p),
     verticalArrangement = Arrangement.spacedBy(M.p),
 ) {
-    itemPhoto(i.photo, 800)?.let { Image(it, null, Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(LocalRadii.current.tile)), contentScale = ContentScale.Crop) }
+    if (photo) Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(LocalRadii.current.tile)).background(M.sunk).testTag(ITEM_PHOTO_TAG)) {
+        itemPhoto(i.photo, 800)?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+    }
     Column(Modifier.padding(horizontal = 6.u).padding(bottom = 6.u), verticalArrangement = Arrangement.spacedBy(3.u)) {
         Text(i.title, style = T.who, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (isPick || i.price != null) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.u)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.u)) {
             if (isPick) PickTag()
-            i.price?.let { Text(it, style = T.src.copy(color = M.text), maxLines = 1) }
+            // Same vertical padding as PickTag, so the row is as tall with or without it.
+            Text(i.price.orEmpty(), style = T.src.copy(color = M.text), maxLines = 1, modifier = Modifier.padding(vertical = 1.u))
         }
-        i.detail?.let { Text(it, style = T.msg, maxLines = 2, overflow = TextOverflow.Ellipsis) }
-        i.app?.let { Text(it, style = T.src, maxLines = 1) }
+        Text(i.detail.orEmpty(), style = T.msg, minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(i.app.orEmpty(), style = T.src, maxLines = 1)
     }
 }
 

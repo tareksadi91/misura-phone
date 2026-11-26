@@ -126,21 +126,38 @@ private val ACTIONS = listOf(
 private val AREA = ToolSpec("area", "Say which city or area the app is searching now, in the words its screen shows.", schema("text" to "string", required = listOf("text")))
 
 /**
- * A near_user run: the phone's city is looked up next to the app launch, and the area the app searches is what the hand reads off the
- * screen. Never inferred from the phone's city (Codex audit 24 Nov). Every exit of such a run carries both.
+ * A near_user run: the phone's fix is read once, next to the app launch ([start]), and turned into a city; the area the app searches is what
+ * the hand reads off the screen. Never inferred from the phone's city (Codex audit 24 Nov). Every exit of such a run carries both. The same
+ * fix serves the run's map pins and the map's "you" dot ([fix]); it never goes into the result, a log line or a model turn.
  */
-internal class Near(private val city: kotlinx.coroutines.Deferred<String?>, private val said: (Boolean) -> Unit = {}) {
+internal class Near(private val read: suspend () -> Pair<Double, Double>?, private val cityOf: suspend (Pair<Double, Double>?) -> String?,
+    private val scope: CoroutineScope, private val said: (Boolean) -> Unit = {}) {
     /** Swipes down that went through after the first record on a near run; [UseApp.RESULT_SCROLLS] of them end the run. */
     var resultScrolls = 0
     var area: String? = null
     var userIn: String? = null; private set
+    /** How long the hand waited for the fix and city before its first prompt (timing log only). */
+    var waitMs = 0L; private set
     private var asked = false
+    private var where: kotlinx.coroutines.Deferred<Pair<Pair<Double, Double>?, String?>>? = null
+    /** Reads the fix (once per run) and its city in the background; called next to the app launch. */
+    fun start() { if (where == null) where = scope.async { val f = runCatching { read() }.getOrNull(); f to runCatching { cityOf(f) }.getOrNull() } }
+    /** The run's fix, or null (not read, none, or this run never got that far). */
+    suspend fun fix(): Pair<Double, Double>? = where?.let { runCatching { it.await().first }.getOrNull() }
     suspend fun line(): String {
-        if (!asked) { asked = true; userIn = runCatching { city.await() }.getOrNull(); said(userIn != null) }
-        return userIn?.let { c -> "Near the user: they are in $c now. Before recording, find which city or area the app is searching (a location or city field, often at the top) and call area with its words. If it is another place, change it by typing $c into the app's own location or city search, not with a 'use my location' or 'near me' button (that asks for a permission nobody can answer here); then call area again. If it can't be changed, go on: the user is told which area the results are for." }
-            ?: "Near the user: where the user is now is unknown. Find which city or area the app is searching and call area with its words; don't change it."
+        if (!asked) { asked = true; start(); val t = System.nanoTime(); userIn = runCatching { where!!.await().second }.getOrNull(); waitMs = (System.nanoTime() - t) / 1_000_000; said(userIn != null) }
+        return userIn?.let { c -> "Near the user: they are in $c now. $DISTANCE_FIRST Before recording, find which city or area the app is searching (a location or city field, often at the top) and call area with its words (a list around your location: say so). If it is another place, change it by typing $c into the app's own location or city search; then call area again. If it can't be changed, go on: the user is told which area the results are for." }
+            ?: "Near the user: where the user is now is unknown. $DISTANCE_FIRST Find which city or area the app is searching and call area with its words; don't change it."
     }
     fun stamp(o: kotlinx.serialization.json.JsonObjectBuilder) { o.put("searchArea", area ?: "not read: the hand did not say which area the app searched"); o.put("userIn", userIn ?: "unknown") }
+
+    companion object {
+        /**
+         * Start at the user (owner 26 Nov): the app's own "around you, by distance" before a keyword search; looked for once among the controls
+         * in sight, never hunted for (24 Nov: "use the app's sort" sent the hand through menus); a permission question is never answered.
+         */
+        const val DISTANCE_FIRST = "Start where the user is: take one look at the controls in sight for the app's own way to list things around the user's current position by distance (a distance sort, a 'nearby' or 'near me' option, a map or list centred on your location). If one is there, use it before any keyword search and check it took; if none is in sight, go on without it and never hunt through menus for it. A list is the nearest first only when it is sorted by distance. If Android asks a permission question (allow location?), never answer it: press back and go on without it."
+    }
 }
 
 /** The tools for one round: a direction that moved nothing on this screen ([stuck]: true = up, false = down) is left out of scroll; both: no scroll at all. */
@@ -187,12 +204,16 @@ class UseApp(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     /** How long a screen stays parked: as long as the gate's yes lasts. */
     private val parkMs: Long = 5 * 60_000,
-    /** The city the phone is in now, for near_user runs only (null = unknown). Read only when a run asks for it. */
-    private val whereNow: suspend () -> String? = { null },
+    /** Where the phone is now (a fresh fix or null), read once per near_user run, only when a run asks for it. */
+    private val here: suspend () -> Pair<Double, Double>? = { null },
+    /** The city at the run's fix (null = unknown; the fix may be null too). */
+    private val whereNow: suspend (Pair<Double, Double>?) -> String? = { null },
     /** Certain map pins for what a near-me run found, looked up after the run (owner list item 7); null = none are looked up. */
     private val pins: ItemPins? = null,
     /** The whole pin lookup's time limit (sign-in included); what is in by then is kept. */
     private val pinMs: Long = 4_000,
+    /** Timing lines for phone benchmarks (MisuraTiming): times and counts only. */
+    private val timing: (String) -> Unit = { com.misura.phone.hidden.hiddenTiming(it) },
 ) : Tool {
     private val apps get() = appList()
     // A getter: an app installed while Misura runs is offered on the next call.
@@ -301,32 +322,49 @@ class UseApp(
     /** Before anything final (done, a question card): true = words came in that the model has not seen, so go round again. Otherwise no more words are taken. */
     private fun heardMore(mine: MutableList<String>, shown: Int): Boolean = synchronized(lock) { if (mine.size > shown) true else { if (added === mine) added = null; false } }
 
-    override suspend fun run(args: JsonObject, note: suspend (String) -> Unit): JsonObject = pinned(
-        // The budget is kept inside the loop (what was recorded comes back); this outer limit only catches a call that never returns.
-        withTimeoutOrNull(budgetMs + SAFETY_MS) {
-            hiddenOperation.withLock {
-                val pkg = args.str("app")
-                withHiddenPackage(pkg) {
-                    try { work(pkg, args, note).also { if (it["error"] != null) stopped() } }
-                    catch (e: kotlinx.coroutines.CancellationException) { stopped(); throw e }
+    override suspend fun run(args: JsonObject, note: suspend (String) -> Unit): JsonObject {
+        val t0 = System.nanoTime()
+        // A near_user run (not a card tap): its fix is read once, when work() launches the app, and used for the city, the pins and the dot.
+        val near = if ((args["near_user"] as? JsonPrimitive)?.booleanOrNull == true && args.str("item") == null)
+            Near(here, whereNow, scope) { known -> log("use_app ${args.str("app")}: near_user city=${if (known) "known" else "unknown"}") } else null
+        val r = pinned(
+            // The budget is kept inside the loop (what was recorded comes back); this outer limit only catches a call that never returns.
+            withTimeoutOrNull(budgetMs + SAFETY_MS) {
+                hiddenOperation.withLock {
+                    val pkg = args.str("app")
+                    withHiddenPackage(pkg) {
+                        try { work(pkg, args, note, near).also { if (it["error"] != null) stopped() } }
+                        catch (e: kotlinx.coroutines.CancellationException) { stopped(); throw e }
+                    }
                 }
-            }
-        } ?: err("took longer than ${(budgetMs + SAFETY_MS) / 1000} s; stopped"))
+            } ?: err("took longer than ${(budgetMs + SAFETY_MS) / 1000} s; stopped"), near)
+        if (near != null) {
+            val ids = (r["items"] as? JsonArray)?.mapNotNull { (it as? JsonObject)?.str("id") }.orEmpty()
+            // Things were recorded only after the hand's first prompt, which waited for the fix: no wait here. A run that ended early doesn't wait.
+            val fix = if (ids.isEmpty()) null else near.fix()
+            // The map's "you" dot: this run's fix, in memory only, for this session's set of things (never in the result, a log or a model turn).
+            coroutineContext[RunningFor]?.session?.let { id -> NearYou.keep(id, fix, ids) }
+            // One timing line per near run for phone benchmarks: times and yes/no only.
+            timing("use_app near total=${(System.nanoTime() - t0) / 1_000_000}ms location_wait=${near.waitMs}ms fix=${fix != null} items=${ids.size}")
+        }
+        return r
+    }
 
     /**
      * Near-me finds (owner list item 7): the five nearest things that show a distance get a certain map pin or the reason they have none, looked up
      * once the hidden screen is let go (a stage of its own: work() is at the JVM method-size limit). Things not looked up carry neither, so their
      * cards say nothing about the map. Any failure or the time limit means no pin, never a failed run; Stop still cancels it.
      */
-    private suspend fun pinned(r: JsonObject): JsonObject {
+    private suspend fun pinned(r: JsonObject, near: Near?): JsonObject {
         val p = pins ?: return r
         if (((r["itemsFrom"] as? JsonObject)?.get("near") as? JsonPrimitive)?.booleanOrNull != true) return r
         val items = (r["items"] as? JsonArray)?.map { it as? JsonObject ?: return r } ?: return r
         val asks = items.mapNotNull { o -> PinAsk(o.str("id") ?: return@mapNotNull null, o.str("title") ?: return@mapNotNull null, o.str("distance")?.let(::meters) ?: return@mapNotNull null) }.take(PIN_MAX)
         if (asks.isEmpty()) return r
+        val at = near?.fix() ?: return r // the run's own fix: no second location read
         val got = java.util.concurrent.ConcurrentHashMap<String, PinFound>()
         val t0 = System.nanoTime()
-        try { withTimeoutOrNull(pinMs) { p.find(asks, r.str("userIn")?.takeIf { it != "unknown" }) { id, f -> if (asks.any { it.id == id }) got[id] = f } } }
+        try { withTimeoutOrNull(pinMs) { p.find(asks, r.str("userIn")?.takeIf { it != "unknown" }, at) { id, f -> if (asks.any { it.id == id }) got[id] = f } } }
         catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (_: Exception) { } // no pin; the reason is not logged (it can carry a venue's words)
         // Counts only: never coordinates or titles.
@@ -343,7 +381,7 @@ class UseApp(
         }
     }
 
-    private suspend fun work(pkg: String?, args: JsonObject, note: suspend (String) -> Unit): JsonObject {
+    private suspend fun work(pkg: String?, args: JsonObject, note: suspend (String) -> Unit, near: Near?): JsonObject {
         if (pkg == null) return err("use_app needs app")
         // Covers fresh runs, parked resumes, show=true transfers and card taps: all start here, under the operation lock.
         com.misura.phone.access.AppAccess.refusal(pkg)?.let { why ->
@@ -358,7 +396,7 @@ class UseApp(
         // How many things to record (find or compare goals); a run that opens the app for the user has nothing to count.
         val count = if (show) null else (args["count"] as? JsonPrimitive)?.intOrNull?.takeIf { it > 0 }?.coerceAtMost(MAX_ITEMS)
         if (!ScreenReader.connected()) return err("accessibility is off")
-        val near = if ((args["near_user"] as? JsonPrimitive)?.booleanOrNull == true && thing == null) Near(scope.async { runCatching { whereNow() }.getOrNull() }) { known -> log("use_app $pkg: near_user city=${if (known) "known" else "unknown"}") } else null
+        near?.start()
         // Near the user the nearest may be further down: collect up to 10 (over at most 3 screens) whatever the cards wanted; the main model
         // picks from the distances (owner list item 3). Elsewhere the count still ends the run. No new locals in work(): each one is saved
         // and restored at every suspension point, and work() sits at the JVM method-size limit (collectOf, Near.resultScrolls).
@@ -736,7 +774,7 @@ class UseApp(
                     if (earlier.size >= 2 && refused.add(key)) { repeats++; return "not made: the third same tap on ${e.line} on a same-looking screen (steps ${earlier.joinToString(" and ")}); it changed nothing. Do something else: record what the list shows (a condition you can't see stays unverified), go back, or call done or fail. Only if this tap really makes progress the screen doesn't show, make it again" }
                     if (label != null) when (val g = gated(label, e, "tap “${cardWords(label)}”")) { null -> Unit; else -> return g }
                     val went = HiddenInput.tap(s, x, y)
-                    if (went == false) return "tap on ${e.line} did not go through"
+                    if (went == false) return if (ScreenReader.permissionQuestion(s.displayId)) PERMISSION_Q else "tap on ${e.line} did not go through"
                     tappedAt[key] = earlier + (did.size + 1) // an unconfirmed tap may have landed: it counts as made
                     if (went == null) return "tap on ${e.line}: $UNCONFIRMED, so it may have landed. Look at the screen before tapping again"
                     val before = earlier.firstOrNull() ?: return "tapped ${e.line}"
@@ -770,7 +808,8 @@ class UseApp(
                     // there before a yes is spent, so a yes for form A never presses Enter in form B.
                     if (focus != null && !focus.search && typed.isNotEmpty())
                         when (val g = gated("Enter", focus, "press Enter")) { null -> Unit; else -> return g }
-                    hidden.key(s, 66); tappedAt[ek] = pressed + (did.size + 1); return "pressed enter"
+                    if (!hidden.key(s, 66)) return PERMISSION_Q
+                    tappedAt[ek] = pressed + (did.size + 1); return "pressed enter"
                 }
                 // What the step line says right now, in plain words; nothing for done/fail (the step closes).
                 stepLine(c, el())?.let { note("$app: $it") }
@@ -893,6 +932,8 @@ class UseApp(
         near?.stamp(this)
         // Near the user: nearest first by the distance the app shows, unknown last (stable); elsewhere the app's order.
         val shown = if (near != null) things.sortedBy { t -> t.distance?.let(::meters) ?: Double.MAX_VALUE } else things
+        // Always the nearest among those checked, even when the app's own distance sort was used: rising distances in a sample don't prove the
+        // app sorted them (Codex review 26 Nov). The owner rule is served by the hand starting from the app's sort; the claim stays modest.
         if (near != null && things.isNotEmpty()) put("order", if (things.any { it.distance != null }) "nearest first by the distance the app shows, among the ${things.size} checked; items without a distance last" else "the app's order: no distances shown")
         if (things.isNotEmpty()) put("items", buildJsonArray { shown.forEach { t -> add(buildJsonObject { put("id", t.id); put("title", t.title); t.price?.let { put("price", it) }; t.detail?.let { put("detail", it) }; t.distance?.let { put("distance", it) }; t.photo?.let { put("photo", it) } }) } })
         // near: the set came from a near-me run (text-only cards, a map when a pin is certain), with or without a fix or pins.
@@ -979,6 +1020,8 @@ class UseApp(
         private val NUDGE_ROUNDS = setOf(6, 12)
         const val NUDGE = "If the goal is to find or compare things: once the category for the kind of thing is set (or the app has none for it), record the things on this screen now with item. Don't look for more filters or reopen one that didn't change. A condition you can't see on a thing stays unverified: record it and say so in detail."
         private const val TOO_LATE = "\u0000too late"
+        /** What the hand is told when an action is refused because a permission question is up (only Back goes through there). */
+        const val PERMISSION_Q = "not done: a permission question is on the screen. Misura never answers these; press back"
         const val CUT_OFF = "the picture of that one is cut off; scroll so it is fully on screen, then record it again"
         /** A gesture Android took but never confirmed (HiddenInput null): it may have landed. */
         private const val UNCONFIRMED = "Android did not confirm it"

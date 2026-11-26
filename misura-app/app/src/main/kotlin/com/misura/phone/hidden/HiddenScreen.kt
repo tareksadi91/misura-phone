@@ -81,7 +81,11 @@ open class ShizukuHiddenScreen(private val ctx: Context) : HiddenScreen {
     override suspend fun taskDisplayOf(pkg: String): Int? = io { displayOf(ShizukuBridge.bind(ctx), pkg) }
 
     /** A key press on the hidden display only (4 = back, 66 = enter). */
-    suspend fun key(s: DisplaySession, code: Int) = io { live(s).exec(arrayOf("input", "-d", s.displayId.toString(), "keyevent", code.toString())); Unit }
+    /** False = not pressed: while a permission question is up only Back (4) goes through ([ScreenReader.permissionQuestion]). */
+    suspend fun key(s: DisplaySession, code: Int): Boolean {
+        if (code != 4 && ScreenReader.permissionQuestion(s.displayId)) return false
+        return io { live(s).exec(arrayOf("input", "-d", s.displayId.toString(), "keyevent", code.toString())); true }
+    }
 
     /** JPEG of [bounds] (left, top, right, bottom on the hidden display, like UiNode.bounds), at most [maxWidth] wide; null when there is no frame yet or the region is empty. */
     suspend fun grab(s: DisplaySession, bounds: IntArray, maxWidth: Int = 720): ByteArray? = io { live(s).grab(s.displayId, bounds[0], bounds[1], bounds[2], bounds[3], maxWidth) }

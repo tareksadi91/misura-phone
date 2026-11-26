@@ -22,6 +22,8 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.performSemanticsAction
+import com.misura.phone.cards.u
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.StateRestorationTester
@@ -1215,5 +1217,75 @@ class HomeFlowTest {
         ask("is it still there?"); waitText("Yes, still there")
         brain.seen.last().last().toString() shouldContain "(Looking at: item id i1)"
         brain.seen.last().last().toString().contains("Blue jacket") shouldBe false
+    }
+
+    /**
+     * The near-me map's "you" dot goes once it is an hour old, while the screen stays open (Codex P2: the screen read it once and kept it).
+     * The stand-in use_app keeps the dot as UseApp does (the session's fix, in memory); the dot's clock is moved on an hour. Needs the map style
+     * from the network, like ItemCardsTest. Red on the prior commit: the dot stayed until something else recomposed the screen.
+     */
+    @Test fun theYouDotGoesWhenItTurnsAnHourOldWhileTheScreenIsOpen() {
+        val clock = com.misura.phone.hands.NearYou.clock
+        var t = 10L * 3_600_000_000_000L
+        com.misura.phone.hands.NearYou.clock = { t }
+        try {
+            val useApp = object : Tool {
+                override val spec = ToolSpec("use_app", "browse an app", JsonObject(emptyMap()))
+                override suspend fun run(args: JsonObject): JsonObject {
+                    kotlin.coroutines.coroutineContext[com.misura.core.agent.RunningFor]?.session?.let { com.misura.phone.hands.NearYou.keep(it, 48.1201 to 11.5302, listOf("n1", "n2")) }
+                    return Json.parseToJsonElement("""{"items":[
+                        {"id":"n1","title":"Atlas Fitness Westend","detail":"Fitness","distance":"1.2 km","pin":{"lat":48.1482,"lng":11.5761}},
+                        {"id":"n2","title":"Kraftwerk Gym","detail":"Fitness","distance":"2.6 km"}],"itemsFrom":{"app":"Sports app","pkg":"com.example.sports","near":true}}""").jsonObject
+                }
+                override fun label(args: JsonObject) = "Looking in Sports app"
+                override fun summary(result: JsonObject) = "2 items found"
+            }
+            val agent = Agent(store, Script(call("use_app"), call("show_items", """{"itemIds":["n1","n2"],"pick":"n1","line":"Closest of the 2 checked."}""")), listOf(useApp), System::currentTimeMillis, scope)
+            rule.setContent { HomeScreen(agent, store, photos = null, openRequest = null, onOpenItem = {}) }
+            ask("gyms near me"); waitText("Atlas Fitness Westend")
+            val inst = InstrumentationRegistry.getInstrumentation()
+            fun dots(): Int? {
+                var view: org.maplibre.android.maps.MapView? = null
+                inst.runOnMainSync {
+                    val a = androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).single()
+                    fun find(v: android.view.View): org.maplibre.android.maps.MapView? = v as? org.maplibre.android.maps.MapView
+                        ?: (v as? android.view.ViewGroup)?.let { g -> (0 until g.childCount).firstNotNullOfOrNull { find(g.getChildAt(it)) } }
+                    view = find(a.window.decorView)
+                }
+                var n: Int? = null
+                inst.runOnMainSync { view?.getMapAsync { m -> if (m.style?.isFullyLoaded == true) n = m.markers.count { it.title.isNullOrEmpty() } } }
+                inst.waitForIdleSync()
+                return n
+            }
+            rule.waitUntil(20_000) { dots() == 1 }
+            t += 3_600_000_000_001L // an hour and a bit later, the screen still open
+            rule.waitUntil(5_000) { dots() == 0 }
+        } finally { com.misura.phone.hands.NearYou.clock = clock }
+    }
+
+    /** Owner, 26 Nov: the Ask button was ~15 dp taller than the field, so the input row jumped when it appeared. */
+    @Test fun askButtonIsTheFieldsHeightSoTheRowDoesNotJump() {
+        home(Script())
+        rule.onNodeWithContentDescription(ASK_FIELD).performTextInput("A draft")
+        rule.waitUntil(5_000) { rule.onAllNodes(hasText("Ask")).fetchSemanticsNodes().isNotEmpty() }
+        val field = rule.onNodeWithContentDescription(ASK_FIELD).fetchSemanticsNode().boundsInRoot
+        val button = rule.onNode(hasText("Ask")).fetchSemanticsNode().boundsInRoot
+        // The field's semantics sit inside its 8.u padding: its outer box is that much taller on each side, and Ask must match the outer box.
+        val pad = with(rule.density) { 8.u.toPx() }
+        check(kotlin.math.abs(button.top - (field.top - pad)) < 1.5f && kotlin.math.abs(button.bottom - (field.bottom + pad)) < 1.5f) { "field $field (+$pad), Ask $button" }
+    }
+
+    /** Owner, 26 Nov: asking about an open place, the steps pushed its card down a step at a time; the "Working on" chip names it. */
+    @Test fun anOpenPlaceStepsAsideWhileMisuraWorksAndComesBackWithTheAnswer() {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        home(Script(find, show, { kotlinx.coroutines.runBlocking { gate.await() }; text("Friday 12–22")() })); ask("best bibimbap"); waitText("PICK")
+        rule.onNode(SemanticsMatcher("opens Namsan") { androidx.compose.ui.semantics.SemanticsActions.OnClick in it.config && it.config[androidx.compose.ui.semantics.SemanticsActions.OnClick].label == "Open Namsan" })
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
+        waitText("Directions")
+        ask("is it open Friday?")
+        waitText("is it open Friday?")
+        rule.onAllNodes(hasText("Directions")).assertCountEquals(0)
+        gate.complete(Unit)
+        waitText("Friday 12–22"); waitText("Directions")
     }
 }

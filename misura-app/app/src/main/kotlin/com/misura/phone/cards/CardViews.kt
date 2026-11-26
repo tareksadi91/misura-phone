@@ -157,7 +157,7 @@ enum class Kind { Commit, Forward, Secondary }
  * [working] swaps the label for a meter and blocks taps.
  */
 @Composable
-fun MButton(label: String, kind: Kind, modifier: Modifier = Modifier, enabled: Boolean = true, working: Boolean = false, onClick: () -> Unit) {
+fun MButton(label: String, kind: Kind, modifier: Modifier = Modifier, enabled: Boolean = true, working: Boolean = false, padV: Dp = 13.u, onClick: () -> Unit) {
     val shape = RoundedCornerShape(LocalRadii.current.tile)
     val src = remember { MutableInteractionSource() }
     val pressed by src.collectIsPressedAsState()
@@ -172,7 +172,7 @@ fun MButton(label: String, kind: Kind, modifier: Modifier = Modifier, enabled: B
         modifier.width(IntrinsicSize.Max).scale(sc).alpha(if (enabled) 1f else 0.4f).heightIn(min = 48.dp).then(base)
             .clickable(src, null, enabled = enabled && !working, role = Role.Button, onClickLabel = label, onClick = onClick)
             .semantics { if (working) contentDescription = "$label, working" }
-            .padding(horizontal = 12.u, vertical = 13.u),
+            .padding(horizontal = 12.u, vertical = padV),
         horizontalArrangement = if (kind == Kind.Secondary || working) Arrangement.Center else Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {

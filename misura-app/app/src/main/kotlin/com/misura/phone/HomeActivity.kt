@@ -55,7 +55,8 @@ class HomeActivity : ComponentActivity() {
 
     // In front = resumed and focused: alerts stay quiet and the shade copies go (everything is on Home).
     private var resumed = false
-    override fun onResume() { super.onResume(); resumed = true; front(hasWindowFocus()) }
+    // Location simply there when a near-me request comes (owner 26 Nov): one background fix, held in memory, when Misura comes to the front.
+    override fun onResume() { super.onResume(); resumed = true; front(hasWindowFocus()); com.misura.phone.brain.PhoneLocation.warm(this, MisuraGraph.scope) }
     override fun onPause() { resumed = false; front(false); super.onPause() }
     override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); front(hasFocus) }
     private fun front(focused: Boolean) = com.misura.phone.notify.SessionAlerts.front(this, resumed && focused)

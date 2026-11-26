@@ -12,8 +12,8 @@ sealed interface PinFound {
 
 /**
  * Certain map pins for things a near-me app run found (owner list item 7). Each answer goes to [got] as it arrives, so the caller's time
- * limit keeps the ones already in. Implementations read the phone's fix themselves and never hand it back: only venue pins leave.
+ * limit keeps the ones already in. [at] = the run's own fix (one location read per run); implementations never hand it back: only venue pins leave.
  */
 fun interface ItemPins {
-    suspend fun find(asks: List<PinAsk>, city: String?, got: (String, PinFound) -> Unit)
+    suspend fun find(asks: List<PinAsk>, city: String?, at: Pair<Double, Double>, got: (String, PinFound) -> Unit)
 }

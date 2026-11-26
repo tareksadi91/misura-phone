@@ -11,11 +11,15 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
-/** Taps and types on the hidden display only. Typing sets the field's text directly, so no keyboard opens. */
+/**
+ * Taps and types on the hidden display only. Typing sets the field's text directly, so no keyboard opens.
+ * Nothing is done while a permission question is up there ([ScreenReader.permissionQuestion]): Misura never answers one; only Back closes it.
+ */
 object HiddenInput {
     /** True = done, false = not done, null = taken but never confirmed: it may have landed. */
     suspend fun tap(s: DisplaySession, x: Int, y: Int): Boolean? {
         require(s.displayId != 0) { "display 0 is the main screen" }
+        if (ScreenReader.permissionQuestion(s.displayId)) return false
         val svc = MisuraAccessibility.instance ?: return false
         val g = GestureDescription.Builder().setDisplayId(s.displayId)
             .addStroke(GestureDescription.StrokeDescription(Path().apply { moveTo(x.toFloat(), y.toFloat()) }, 0, 60)).build()
@@ -25,6 +29,7 @@ object HiddenInput {
     /** Sets an editable field's text, then reads it back; true only on an exact match. */
     suspend fun setText(s: DisplaySession, viewId: String, text: String): Boolean {
         require(s.displayId != 0) { "display 0 is the main screen" }
+        if (ScreenReader.permissionQuestion(s.displayId)) return false
         val node = ScreenReader.root(s.displayId)?.findAccessibilityNodeInfosByViewId(viewId)?.firstOrNull { it.isEditable } ?: return false
         val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
         if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return false
@@ -35,6 +40,7 @@ object HiddenInput {
     /** Sets the text of the editable field at exactly these bounds (how [UseApp] names a field it saw). */
     suspend fun setTextAt(s: DisplaySession, bounds: IntArray, text: String): Boolean {
         require(s.displayId != 0) { "display 0 is the main screen" }
+        if (ScreenReader.permissionQuestion(s.displayId)) return false
         val want = android.graphics.Rect(bounds[0], bounds[1], bounds[2], bounds[3])
         fun find(n: AccessibilityNodeInfo): AccessibilityNodeInfo? {
             if (n.isEditable && android.graphics.Rect().also { n.getBoundsInScreen(it) } == want) return n
@@ -51,6 +57,7 @@ object HiddenInput {
     /** As [tap]: null = never confirmed. */
     suspend fun swipe(s: DisplaySession, x1: Int, y1: Int, x2: Int, y2: Int): Boolean? {
         require(s.displayId != 0) { "display 0 is the main screen" }
+        if (ScreenReader.permissionQuestion(s.displayId)) return false
         val svc = MisuraAccessibility.instance ?: return false
         val path = Path().apply { moveTo(x1.toFloat(), y1.toFloat()); lineTo(x2.toFloat(), y2.toFloat()) }
         val g = GestureDescription.Builder().setDisplayId(s.displayId).addStroke(GestureDescription.StrokeDescription(path, 0, 300)).build()

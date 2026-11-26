@@ -32,6 +32,9 @@ import com.misura.phone.screen.rememberAppSheetState
 import com.misura.phone.screen.sheetRows
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -386,7 +389,9 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
                             if (say is Say.Approve && !thinking) Drafted(o, say, turnSteps, now, openHistory)
                             else if (thinking) Working(o, turnSteps, now, openHistory, thinking = true)
                             else (say as? Say.Answer)?.takeIf { o.s.revision > detailRevision }?.let { AnswerText(it.line, Modifier.padding(horizontal = M.gutter - M.m), it) }
-                            if (say !is Say.Approve) front?.let { PlaceDetail(it, photos) }
+                            // While Misura works on it, the place steps aside: the "Working on" chip names it, and the steps no longer push
+                            // the card down a step at a time (owner, 26 Nov). It comes back with the answer.
+                            if (say !is Say.Approve && !thinking) front?.let { PlaceDetail(it, photos) }
                         }
                         Screen.FullMap, Screen.Root -> when {
                             t == Screen.FullMap || (!thinking && places.isNotEmpty() && items.isEmpty() && !drafting && (say as? Say.Answer)?.citations.isNullOrEmpty()) ->
@@ -416,7 +421,13 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
                                     }
                                 }
                             }
-                            items.isNotEmpty() -> ItemScreen(items, o.s.items?.pick, (say as? Say.Answer)?.line, nav.index, { nav = nav.select(it) }, onOpenItem ?: { item: ItemFact -> agent.openItem(o.s.id, item); Unit }, stale = o.stale)
+                            items.isNotEmpty() -> {
+                                // The "you" dot follows the screen's clock tick (now), so it goes when it turns an hour old while the screen stays open;
+                                // derived, so the map only hears of it when the dot itself changes, not on every tick.
+                                val ids = items.map { it.id }
+                                val you by remember(o.s.id, ids) { derivedStateOf { now; com.misura.phone.hands.NearYou.at(o.s.id, ids) } }
+                                ItemScreen(items, o.s.items?.pick, (say as? Say.Answer)?.line, nav.index, { nav = nav.select(it) }, onOpenItem ?: { item: ItemFact -> agent.openItem(o.s.id, item); Unit }, stale = o.stale, you = you)
+                            }
                         }
                     }
                 }
@@ -545,7 +556,7 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
                     onDown = { talkDown() },
                     onUp = { talk.up() }, onCancel = { talk.cancel() })
                 else if (sideKey && text.isBlank()) Unit
-                else MButton("Ask", Kind.Forward, enabled = text.isNotBlank() && !listening) { if (!listening) {
+                else MButton("Ask", Kind.Forward, Modifier.fillMaxHeight(), enabled = text.isNotBlank() && !listening, padV = 8.u) { if (!listening) {
                     val t = text.trim(); text = ""
                     if (sheet.engaged) sheet.hideKeyboard() else { keyboard?.hide(); focus.clearFocus() }
                     submit(t, target)
@@ -559,7 +570,7 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
 
 /**
  * Which texture strength the screen in front gets (design-system §12 Atmosphere). Mirrors the render branches below
- * (full map wins, a place detail keeps its card while working, a bottom card wins over Steps) without changing them.
+ * (full map wins, a place detail hides its card while working, a bottom card wins over Steps) without changing them.
  */
 private fun atmosphereOf(plainHome: Boolean, earlier: Boolean, requestKeyboard: Boolean, listening: Boolean, populated: Boolean,
     o: Open?, nav: Nav, taskOpen: Boolean): Atmosphere {
@@ -583,7 +594,7 @@ private fun atmosphereOf(plainHome: Boolean, earlier: Boolean, requestKeyboard: 
     }
     val cardInFront = when (val t = nav.top) {
         Screen.FullMap -> true
-        is Screen.Detail -> say !is Say.Approve && o.facts[t.placeId] != null
+        is Screen.Detail -> !thinking && say !is Say.Approve && o.facts[t.placeId] != null
         Screen.Root -> (!thinking && places.isNotEmpty() && items.isEmpty() && !drafting && !cited) ||
             !(thinking || (places.isEmpty() && items.isEmpty()) || drafting || cited) && items.isNotEmpty()
         else -> false
@@ -629,7 +640,9 @@ private fun HomeInput(sheet: AppSheetState, plainHome: Boolean, text: String, on
     listening: Boolean, level: () -> Float, fieldFocus: FocusRequester, onFocus: (Boolean) -> Unit,
     openFirstApp: () -> Unit, action: @Composable () -> Unit) {
     val searchingApps = plainHome && sheet.searching
-    Row(horizontalArrangement = Arrangement.spacedBy(M.gap)) {
+    // The field sets the row's height; the button beside it fills that height and never adds to it, so the row doesn't jump when
+    // Ask comes and goes (owner, 26 Nov: the button was ~15 dp taller than the field).
+    Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(M.gap)) {
         Box(Modifier.weight(1f), contentAlignment = androidx.compose.ui.Alignment.CenterStart) {
             // While it listens the field steps aside for the Listening sign (bars + word, bottom left as in the design).
             // It stays in place, unseen, so focus and anything typed survive the hold.
@@ -702,7 +715,7 @@ private fun TalkButton(listening: Boolean, enabled: Boolean, onDown: () -> Unit,
     val label = if (listening) "Listening" else "Hold to talk"
     // The gesture outlives recompositions; it must call the callbacks of the screen as it is now (the card in front changes).
     val down by rememberUpdatedState(onDown); val up by rememberUpdatedState(onUp); val cancel by rememberUpdatedState(onCancel)
-    Box(Modifier.heightIn(min = 48.dp).alpha(if (enabled) 1f else 0.4f)
+    Box(Modifier.fillMaxHeight().heightIn(min = 48.dp).alpha(if (enabled) 1f else 0.4f)
         .border(1.5.dp, M.orange, shape) // never solid orange: solid means a tap commits
         .semantics { contentDescription = label; role = Role.Button }
         .pointerInput(enabled) { if (enabled) detectTapGestures(onPress = {
@@ -710,7 +723,7 @@ private fun TalkButton(listening: Boolean, enabled: Boolean, onDown: () -> Unit,
             var released = false
             try { released = tryAwaitRelease() } finally { if (released) up() else cancel() }
         }) }
-        .padding(horizontal = 12.u, vertical = 13.u)) {
+        .padding(horizontal = 12.u, vertical = 8.u), contentAlignment = androidx.compose.ui.Alignment.Center) {
         Text(label, style = com.misura.phone.cards.T.btn, color = M.orange, maxLines = 1)
     }
 }

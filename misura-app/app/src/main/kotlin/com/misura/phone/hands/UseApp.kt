@@ -189,6 +189,10 @@ class UseApp(
     private val parkMs: Long = 5 * 60_000,
     /** The city the phone is in now, for near_user runs only (null = unknown). Read only when a run asks for it. */
     private val whereNow: suspend () -> String? = { null },
+    /** Certain map pins for what a near-me run found, looked up after the run (owner list item 7); null = none are looked up. */
+    private val pins: ItemPins? = null,
+    /** The whole pin lookup's time limit (sign-in included); what is in by then is kept. */
+    private val pinMs: Long = 4_000,
 ) : Tool {
     private val apps get() = appList()
     // A getter: an app installed while Misura runs is offered on the next call.
@@ -297,7 +301,7 @@ class UseApp(
     /** Before anything final (done, a question card): true = words came in that the model has not seen, so go round again. Otherwise no more words are taken. */
     private fun heardMore(mine: MutableList<String>, shown: Int): Boolean = synchronized(lock) { if (mine.size > shown) true else { if (added === mine) added = null; false } }
 
-    override suspend fun run(args: JsonObject, note: suspend (String) -> Unit): JsonObject =
+    override suspend fun run(args: JsonObject, note: suspend (String) -> Unit): JsonObject = pinned(
         // The budget is kept inside the loop (what was recorded comes back); this outer limit only catches a call that never returns.
         withTimeoutOrNull(budgetMs + SAFETY_MS) {
             hiddenOperation.withLock {
@@ -307,7 +311,37 @@ class UseApp(
                     catch (e: kotlinx.coroutines.CancellationException) { stopped(); throw e }
                 }
             }
-        } ?: err("took longer than ${(budgetMs + SAFETY_MS) / 1000} s; stopped")
+        } ?: err("took longer than ${(budgetMs + SAFETY_MS) / 1000} s; stopped"))
+
+    /**
+     * Near-me finds (owner list item 7): the five nearest things that show a distance get a certain map pin or the reason they have none, looked up
+     * once the hidden screen is let go (a stage of its own: work() is at the JVM method-size limit). Things not looked up carry neither, so their
+     * cards say nothing about the map. Any failure or the time limit means no pin, never a failed run; Stop still cancels it.
+     */
+    private suspend fun pinned(r: JsonObject): JsonObject {
+        val p = pins ?: return r
+        if (((r["itemsFrom"] as? JsonObject)?.get("near") as? JsonPrimitive)?.booleanOrNull != true) return r
+        val items = (r["items"] as? JsonArray)?.map { it as? JsonObject ?: return r } ?: return r
+        val asks = items.mapNotNull { o -> PinAsk(o.str("id") ?: return@mapNotNull null, o.str("title") ?: return@mapNotNull null, o.str("distance")?.let(::meters) ?: return@mapNotNull null) }.take(PIN_MAX)
+        if (asks.isEmpty()) return r
+        val got = java.util.concurrent.ConcurrentHashMap<String, PinFound>()
+        val t0 = System.nanoTime()
+        try { withTimeoutOrNull(pinMs) { p.find(asks, r.str("userIn")?.takeIf { it != "unknown" }) { id, f -> if (asks.any { it.id == id }) got[id] = f } } }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (_: Exception) { } // no pin; the reason is not logged (it can carry a venue's words)
+        // Counts only: never coordinates or titles.
+        log("use_app pins asked=${asks.size} pinned=${got.values.count { it is PinFound.Pin }} shared=${got.values.count { (it as? PinFound.NoPin)?.why == "shared" }} none=${got.values.count { (it as? PinFound.NoPin)?.why == "none" }} ms=${(System.nanoTime() - t0) / 1_000_000}")
+        if (got.isEmpty()) return r
+        return buildJsonObject {
+            r.forEach { (k, v) -> put(k, if (k != "items") v else JsonArray(items.map { o ->
+                when (val f = o.str("id")?.let(got::get)) {
+                    is PinFound.Pin -> JsonObject(o + ("pin" to buildJsonObject { put("lat", f.lat); put("lng", f.lng) }))
+                    is PinFound.NoPin -> JsonObject(o + ("noPin" to JsonPrimitive(f.why)))
+                    null -> o
+                }
+            })) }
+        }
+    }
 
     private suspend fun work(pkg: String?, args: JsonObject, note: suspend (String) -> Unit): JsonObject {
         if (pkg == null) return err("use_app needs app")
@@ -854,7 +888,8 @@ class UseApp(
         val shown = if (near != null) things.sortedBy { t -> t.distance?.let(::meters) ?: Double.MAX_VALUE } else things
         if (near != null && things.isNotEmpty()) put("order", if (things.any { it.distance != null }) "nearest first by the distance the app shows, among the ${things.size} checked; items without a distance last" else "the app's order: no distances shown")
         if (things.isNotEmpty()) put("items", buildJsonArray { shown.forEach { t -> add(buildJsonObject { put("id", t.id); put("title", t.title); t.price?.let { put("price", it) }; t.detail?.let { put("detail", it) }; t.distance?.let { put("distance", it) }; t.photo?.let { put("photo", it) } }) } })
-        if (things.isNotEmpty()) put("itemsFrom", buildJsonObject { put("app", app); put("pkg", pkg) })
+        // near: the set came from a near-me run (text-only cards, a map when a pin is certain), with or without a fix or pins.
+        if (things.isNotEmpty()) put("itemsFrom", buildJsonObject { put("app", app); put("pkg", pkg); if (near != null) put("near", true) })
     }
 
     /** One round's text for the hand's model: the goal, the thing to open, the count, the user's words, what was done, the nudge and the screen. */
@@ -938,7 +973,7 @@ class UseApp(
         const val NUDGE = "If the goal is to find or compare things: once the category for the kind of thing is set (or the app has none for it), record the things on this screen now with item. Don't look for more filters or reopen one that didn't change. A condition you can't see on a thing stays unverified: record it and say so in detail."
         private const val TOO_LATE = "\u0000too late"
         const val CUT_OFF = "the picture of that one is cut off; scroll so it is fully on screen, then record it again"
-        private const val SAFETY_MS = 30_000L; private const val MAX_ITEMS = 10; internal const val MAX_COLLECT = MAX_ITEMS; internal const val RESULT_SCROLLS = 6; private const val WEEK_MS = 7 * 24 * 3600 * 1000L
+        private const val SAFETY_MS = 30_000L; private const val MAX_ITEMS = 10; private const val PIN_MAX = 5; internal const val MAX_COLLECT = MAX_ITEMS; internal const val RESULT_SCROLLS = 6; private const val WEEK_MS = 7 * 24 * 3600 * 1000L
     }
 }
 

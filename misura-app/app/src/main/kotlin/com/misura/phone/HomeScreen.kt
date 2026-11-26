@@ -416,7 +416,7 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
                                     }
                                 }
                             }
-                            items.isNotEmpty() -> ItemScreen(items, o.s.items?.pick, (say as? Say.Answer)?.line, nav.index, { nav = nav.select(it) }, onOpenItem ?: { item: ItemFact -> agent.openItem(o.s.id, item); Unit })
+                            items.isNotEmpty() -> ItemScreen(items, o.s.items?.pick, (say as? Say.Answer)?.line, nav.index, { nav = nav.select(it) }, onOpenItem ?: { item: ItemFact -> agent.openItem(o.s.id, item); Unit }, stale = o.stale)
                         }
                     }
                 }

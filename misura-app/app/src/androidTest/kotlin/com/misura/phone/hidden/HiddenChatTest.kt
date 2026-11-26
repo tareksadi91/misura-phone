@@ -73,9 +73,9 @@ class HiddenChatTest {
 
     // Every hand a test makes is let go of at the end: a screen parked after things were found must not outlive its test.
     private val hands = mutableListOf<com.misura.phone.hands.UseApp>()
-    private fun mk(brain: com.misura.core.agent.Brain, maxActions: Int = 25, budgetMs: Long = 150_000, filesDir: java.io.File? = null, log: (String) -> Unit = {}, parkMs: Long = 5 * 60_000, whereNow: suspend () -> String? = { null }) =
+    private fun mk(brain: com.misura.core.agent.Brain, maxActions: Int = 25, budgetMs: Long = 150_000, filesDir: java.io.File? = null, log: (String) -> Unit = {}, parkMs: Long = 5 * 60_000, whereNow: suspend () -> String? = { null }, pins: com.misura.phone.hands.ItemPins? = null) =
         // The app is one task: an earlier test hand's parked screen would still hold it, so a new hand starts after those are let go (the app has one hand).
-        runBlocking { hands.forEach { it.releaseParked() } }.let { com.misura.phone.hands.UseApp(screen, brain, maxActions = maxActions, budgetMs = budgetMs, filesDir = filesDir, log = log, parkMs = parkMs, whereNow = whereNow).also { hands += it } }
+        runBlocking { hands.forEach { it.releaseParked() } }.let { com.misura.phone.hands.UseApp(screen, brain, maxActions = maxActions, budgetMs = budgetMs, filesDir = filesDir, log = log, parkMs = parkMs, whereNow = whereNow, pins = pins).also { hands += it } }
 
     @After fun tearDown(): Unit = runBlocking { hands.forEach { runCatching { it.releaseParked() } }; opened.forEach { runCatching { screen.close(it) } } }
 
@@ -1437,7 +1437,7 @@ class HiddenChatTest {
     }
 
     /** A scripted model on the testapp Gyms page: opens it, says the area, then alternates recording with a swipe down. [onePerScreen] = only the first gym not yet recorded. */
-    private fun gymsBrain(prompts: MutableList<String>, onePerScreen: Boolean) = object : com.misura.core.agent.Brain {
+    private fun gymsBrain(prompts: MutableList<String>, onePerScreen: Boolean, near: Boolean = true) = object : com.misura.core.agent.Brain {
         var recordNext = true
         override suspend fun next(system: String, turns: List<com.misura.core.agent.Turn>, tools: List<com.misura.core.agent.ToolSpec>): com.misura.core.agent.BrainReply {
             val t = turns.last().content.toString(); prompts += t
@@ -1447,12 +1447,12 @@ class HiddenChatTest {
             val calls = when {
                 "TestChat" in scr -> listOf(one("tap", args("i" to at(scr, "Venues"))))
                 "Show gyms" in scr -> listOf(one("tap", args("i" to at(scr, "Show gyms"))))
-                "area: " !in t -> listOf(one("area", args("text" to "Munich")))
+                near && "area: " !in t -> listOf(one("area", args("text" to "Munich")))
                 recordNext -> (if (onePerScreen) gyms.filter { (_, g) -> "recorded item: $g" !in t }.take(1) else gyms)
                     .map { (i, g) -> one("item", args("i" to i, "title" to g)) }.ifEmpty { listOf(one("scroll", args("direction" to "down"))) }
                 else -> listOf(one("scroll", args("direction" to "down")))
             }
-            if ("area: " in t && gyms.isNotEmpty()) recordNext = !recordNext
+            if ((!near || "area: " in t) && gyms.isNotEmpty()) recordNext = !recordNext
             return com.misura.core.agent.BrainReply.Calls(kotlinx.serialization.json.buildJsonObject {}, calls)
         }
     }
@@ -1486,6 +1486,61 @@ class HiddenChatTest {
         check(r["error"] == null) { "$r\n${prompts.lastOrNull()}" }
         check((r["result"] as kotlinx.serialization.json.JsonPrimitive).content.startsWith("checked about 3 screens")) { r.toString() }
         check((r["items"] as kotlinx.serialization.json.JsonArray).size in 2..9) { r.toString() }
+    }
+
+    /** The phone's fix in the pin tests: never in a result (only venue pins leave). */
+    private val PHONE = 48.137154 to 11.576124
+    /** [m] metres north of the phone, a few metres east (so neither coordinate is the phone's own). */
+    private fun north(m: Double) = (PHONE.first + m / 111_195.0) to (PHONE.second + 0.0002)
+    private fun place(name: String, at: Pair<Double, Double>) = """{"id":"${name.hashCode()}-${at.first}","displayName":{"text":"$name"},"location":{"latitude":${at.first},"longitude":${at.second}}}"""
+    /** A stand-in for Places text search (the app allows no cleartext, so the HTTP POST itself is replaced): the gym fixtures' map. */
+    private fun fakePlaces(asked: MutableList<String>) = com.misura.phone.brain.PinLookup({ "fixture-token" }, { "fixture-project" }, { PHONE }, "https://places.invalid/v1") { url, headers, body ->
+        check(url == "https://places.invalid/v1/places:searchText" && headers["Authorization"] == "Bearer fixture-token") { url }
+        val q = (kotlinx.serialization.json.Json.parseToJsonElement(body) as JsonObject)["textQuery"].toString().trim('"')
+        synchronized(asked) { asked += q }
+        when (q) {
+            "Gym Hall" -> 200 to """{"places":[${place("Gym Hall Munich", north(420.0))},${place("Gym Hall", north(8_000.0))}]}"""       // one at 400 m: a pin
+            "Gym West" -> 200 to """{"places":[${place("Gym West", north(900.0))},${place("Gym West", PHONE.first to PHONE.second + 0.012118)}]}""" // two at 0.9 km: shared
+            "Gym Park" -> 200 to """{"places":[${place("Gym Park", north(4_000.0))}]}"""                                                // 1.8 km in the app: none
+            "Gym East" -> 200 to """{"places":[${place("Gym Westend", north(2_100.0))}]}"""                                               // another name: none
+            else -> 500 to "{}"                                                                                                                 // failed: no answer
+        }
+    }
+
+    /**
+     * Item 7: a near-me find gets a certain map pin per venue, in code, after the run: the five nearest that show a distance are looked up; one
+     * place of that name at the app's distance = a pin (its coordinates only), two = shared, a wrong place or distance = none, a failed lookup or
+     * a thing not looked up = neither. The phone's fix never shows in the result. Red before: no pins, no noPin, no itemsFrom.near.
+     */
+    @Test fun aNearRunGivesTheNearestFoundVenuesACertainPinOrSaysWhyNot(): Unit = runBlocking {
+        val prompts = mutableListOf<String>(); val asked = mutableListOf<String>()
+        val r = mk(gymsBrain(prompts, onePerScreen = false), maxActions = 20, filesDir = ctx.filesDir, whereNow = { "Munich" }, pins = fakePlaces(asked)).run(goal("near_user" to true, "count" to 1))
+        check(r["error"] == null) { "$r\n${prompts.lastOrNull()}" }
+        val items = (r["items"] as kotlinx.serialization.json.JsonArray).associate { o -> o as JsonObject; (o["title"] as kotlinx.serialization.json.JsonPrimitive).content to o }
+        fun pin(t: String) = items.getValue(t)["pin"] as? JsonObject
+        fun why(t: String) = (items.getValue(t)["noPin"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        check(asked.sorted() == listOf("Gym East", "Gym Hall", "Gym North", "Gym Park", "Gym West")) { "the five nearest with a distance, once each: $asked" }
+        check(pin("Gym Hall")?.keys == setOf("lat", "lng") && pin("Gym Hall")!!["lat"].toString().toDouble() == north(420.0).first) { r.toString() }
+        check(why("Gym West") == "shared" && pin("Gym West") == null) { r.toString() }
+        check(why("Gym Park") == "none" && why("Gym East") == "none") { r.toString() }
+        check(pin("Gym North") == null && why("Gym North") == null) { "a failed lookup says nothing: $r" }
+        check(pin("Gym River") == null && why("Gym River") == null) { "not looked up says nothing: $r" }
+        check(((r["itemsFrom"] as JsonObject)["near"] as kotlinx.serialization.json.JsonPrimitive).content == "true") { r.toString() }
+        val text = r.toString()
+        check("48.137154" !in text && "11.576124" !in text) { "the phone's own fix is in the result: $text" }
+        // The result goes to the agent through itemsFromResult: the cards see the pin and the reasons.
+        val facts = com.misura.core.agent.itemsFromResult(r).values.associateBy { it.title }
+        check(facts.getValue("Gym Hall").lat != null && facts.getValue("Gym West").noPin == "shared" && facts.values.all { it.near }) { facts.toString() }
+    }
+
+    /** A find that is not near the user looks nothing up on the map and its set is not a near set. Red with the near check off. */
+    @Test fun aRunNotNearTheUserLooksUpNoPins(): Unit = runBlocking {
+        val prompts = mutableListOf<String>(); val asked = mutableListOf<String>()
+        val r = mk(gymsBrain(prompts, onePerScreen = false, near = false), maxActions = 12, filesDir = ctx.filesDir, pins = fakePlaces(asked)).run(goal("count" to 3))
+        check(r["error"] == null) { "$r\n${prompts.lastOrNull()}" }
+        check((r["items"] as kotlinx.serialization.json.JsonArray).isNotEmpty()) { r.toString() }
+        check(asked.isEmpty()) { "looked up: $asked" }
+        check((r["itemsFrom"] as JsonObject)["near"] == null) { r.toString() }
     }
 
     /** Location unknown: the hand reads the app's area and leaves it; the result says the area and that where the user is is unknown. */

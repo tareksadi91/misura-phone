@@ -52,7 +52,7 @@ import java.io.File
 /**
  * Items screen: [line] (Misura's words) as plain text above the cards, which sit at the bottom like the place cards.
  * A near-me app find ([ItemFact.near], owner list item 7) is the decision screen instead: a map on top when some venue has a certain pin
- * (never an empty map), text-only cards with Open in app and, with a pin, Directions; Misura's line goes on the pick's card. [stale] = the
+ * (never an empty map), text-only cards with Open and, with a pin, Directions; Misura's line goes on the pick's card. [stale] = the
  * session is older than PLACES_MAX_AGE_MS: no pins (Places terms, like place cards). [onDirections] opens a Maps link.
  */
 @Composable
@@ -102,7 +102,7 @@ fun noPinLine(why: String?): String? = when (why) {
 
 /**
  * A near-me app find's card (owner list item 7), text only and always the same height: title + PICK; "detail · distance · app" on one line;
- * a spare line (Misura's [line] on the pick, else why the venue has no pin, else empty); Open in app, and Directions only with a pin.
+ * a spare line (Misura's [line] on the pick, else why the venue has no pin, else empty); Open, and Directions only with a pin.
  * The buttons are the tap targets, not the card.
  */
 @Composable
@@ -124,12 +124,13 @@ fun NearItemCard(i: ItemFact, isPick: Boolean, line: String?, onOpen: () -> Unit
             Text(line ?: noPinLine(i.noPin).orEmpty(), style = T.line, minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
-    // Directions keeps its slot when there is no pin (an invisible, untappable stand-in), so both buttons wrap alike on every card and the
-    // cards stay the same height at any width or font size.
+    // "Open →" + "Directions", each on one line (owner 26 Nov: "Open in app →" and "Directions" need ~313 dp, a card has ~260 at 1.0 font
+    // scale, so one wrapped and doubled the row). Directions takes its own width and keeps its slot when there is no pin (an invisible,
+    // untappable stand-in), so the cards stay the same height; Open takes the rest.
     Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(M.gap)) {
-        MButton("Open in app", Kind.Forward, Modifier.weight(1.6f).fillMaxHeight(), onClick = onOpen)
-        if (onDirections != null) MButton("Directions", Kind.Secondary, Modifier.weight(1f).fillMaxHeight(), onClick = onDirections)
-        else Box(Modifier.weight(1f).alpha(0f).clearAndSetSemantics {}) { MButton("Directions", Kind.Secondary, Modifier.fillMaxWidth(), enabled = false) {} }
+        MButton("Open", Kind.Forward, Modifier.weight(1f).fillMaxHeight(), onClick = onOpen)
+        if (onDirections != null) MButton("Directions", Kind.Secondary, Modifier.fillMaxHeight(), onClick = onDirections)
+        else Box(Modifier.alpha(0f).clearAndSetSemantics {}) { MButton("Directions", Kind.Secondary, enabled = false) {} }
     }
 }
 

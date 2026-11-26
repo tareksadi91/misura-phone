@@ -77,6 +77,13 @@ class ItemCardsTest {
         rule.onNodeWithTag(MAP_TAG).assertExists()
         rule.onAllNodesWithTag(ITEM_PHOTO_TAG, useUnmergedTree = true).fetchSemanticsNodes().size shouldBe 0 // near sets are text-only
         rule.onNodeWithText("Nearest of the 3 checked.").assertExists() // Misura's line on the pick's card
+        // Both buttons on one line at full screen width (owner 26 Nov: Directions broke over two lines and doubled the row)
+        for (label in listOf("Open", "Directions")) {
+            val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            rule.onAllNodes(androidx.compose.ui.test.hasText(label), useUnmergedTree = true)[0]
+                .fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult].action?.invoke(layouts)
+            layouts.single().lineCount shouldBe 1
+        }
         rule.onNodeWithText("Directions").performClick()
         opened shouldBe listOf("https://www.google.com/maps/dir/?api=1&destination=48.148200,11.576100")
     }
@@ -86,7 +93,7 @@ class ItemCardsTest {
         rule.onNodeWithTag(MAP_TAG).assertDoesNotExist()
         rule.onAllNodes(androidx.compose.ui.test.hasText("Directions")).fetchSemanticsNodes().size shouldBe 0
         rule.onNodeWithText("Not on the map: more than one place has this name nearby.").assertExists()
-        rule.onAllNodes(androidx.compose.ui.test.hasText("Open in app")).fetchSemanticsNodes().isNotEmpty() shouldBe true
+        rule.onAllNodes(androidx.compose.ui.test.hasText("Open")).fetchSemanticsNodes().isNotEmpty() shouldBe true
     }
 
     @Test fun anOldSessionShowsNoMapAndNoDirections() {
@@ -98,7 +105,7 @@ class ItemCardsTest {
     @Test fun openInAppOpensTheThing() {
         val opened = mutableListOf<String>()
         rule.setContent { MisuraSurface { Box(Modifier.fillMaxSize()) { ItemScreen(near(), null, null, 0, {}, { opened += it.id }, onDirections = {}) } } }
-        rule.onAllNodes(androidx.compose.ui.test.hasText("Open in app"))[0].performClick()
+        rule.onAllNodes(androidx.compose.ui.test.hasText("Open"))[0].performClick()
         opened shouldBe listOf("A1")
     }
 

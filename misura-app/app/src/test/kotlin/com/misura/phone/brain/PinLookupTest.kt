@@ -46,7 +46,7 @@ class PinLookupTest {
     private fun place(name: String, at: Pair<Double, Double>, id: String = name + at.first) =
         """{"id":"$id","displayName":{"text":"$name"},"location":{"latitude":${at.first},"longitude":${at.second}}}"""
 
-    private fun lookup(http: TinyHttp) = PinLookup({ "fixture-token" }, { "fixture-project" }, { phone }, http.base + "/v1")
+    private fun lookup(http: TinyHttp) = PinLookup({ "fixture-token" }, { "fixture-project" }, http.base + "/v1")
 
     @Test fun onlyExactlyOneNamedPlaceAtTheAppsDistanceIsAPin() = runBlocking<Unit> {
         TinyHttp { r ->
@@ -63,7 +63,7 @@ class PinLookupTest {
         }.use { http ->
             val got = mutableMapOf<String, PinFound>()
             lookup(http).find(listOf(PinAsk("a", "Atlas Fitness Westend", 1_200.0), PinAsk("b", "Atlas Fitness", 800.0),
-                PinAsk("c", "Kraftwerk Gym", 2_000.0), PinAsk("d", "Broken Gym", 500.0)), null) { id, f -> got[id] = f }
+                PinAsk("c", "Kraftwerk Gym", 2_000.0), PinAsk("d", "Broken Gym", 500.0)), null, phone) { id, f -> got[id] = f }
             val pin = got["a"] as PinFound.Pin
             assertEquals(north(1_250.0).first, pin.lat, 1e-9)
             assertEquals(PinFound.NoPin("shared"), got["b"])
@@ -77,28 +77,21 @@ class PinLookupTest {
         }
     }
 
-    @Test fun noFixMeansNoLookup() = runBlocking<Unit> {
-        TinyHttp { 200 to """{"places":[]}""" }.use { http ->
-            PinLookup({ "t" }, { "p" }, { null }, http.base).find(listOf(PinAsk("a", "Atlas Fitness", 500.0)), null) { _, _ -> }
-            assertEquals(0, http.requests.size)
-        }
-    }
-
     /** The graph's lookup takes the turn's captured Google route (as find_places, BYOK repair 21 Nov); a route without Google asks nothing. */
     @Test fun theRoutedLookupUsesTheTurnsGoogleRouteAndNoneWithoutIt() = runBlocking<Unit> {
         TinyHttp { 200 to """{"places":[${place("Atlas Fitness", north(500.0))}]}""" }.use { http ->
-            val pins = routedPins(here = { phone }, placesBase = http.base + "/v1")
+            val pins = routedPins(placesBase = http.base + "/v1")
             val google = ModelRoute(ModelProvider.VERTEX, "fixture-model", null, "fixture-hand", null, null,
                 null, "fixture-google-token", "fixture-project", SearchProvider.EXA, "fixture-exa-key", false, false)
             val got = mutableMapOf<String, PinFound>()
-            withContext(ModelRoutes({ google }, http.base).capture()) { pins.find(listOf(PinAsk("a", "Atlas Fitness", 500.0)), null) { id, f -> got[id] = f } }
+            withContext(ModelRoutes({ google }, http.base).capture()) { pins.find(listOf(PinAsk("a", "Atlas Fitness", 500.0)), null, phone) { id, f -> got[id] = f } }
             assertTrue(got["a"] is PinFound.Pin)
             assertEquals("Bearer fixture-google-token", http.requests.single().headers["authorization"])
             assertEquals("fixture-project", http.requests.single().headers["x-goog-user-project"])
 
             val keyOnly = ModelRoute(ModelProvider.OPENAI, "m", "fixture-key", "h", null, null, null, null, "", SearchProvider.EXA, "k", false, false)
-            withContext(ModelRoutes({ keyOnly }, http.base).capture()) { pins.find(listOf(PinAsk("a", "Atlas Fitness", 500.0)), null) { _, _ -> error("no lookup without Google") } }
-            pins.find(listOf(PinAsk("a", "Atlas Fitness", 500.0)), null) { _, _ -> error("no lookup outside a turn") }
+            withContext(ModelRoutes({ keyOnly }, http.base).capture()) { pins.find(listOf(PinAsk("a", "Atlas Fitness", 500.0)), null, phone) { _, _ -> error("no lookup without Google") } }
+            pins.find(listOf(PinAsk("a", "Atlas Fitness", 500.0)), null, phone) { _, _ -> error("no lookup outside a turn") }
             assertEquals(1, http.requests.size)
         }
     }

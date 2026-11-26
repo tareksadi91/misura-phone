@@ -416,7 +416,8 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
                                     }
                                 }
                             }
-                            items.isNotEmpty() -> ItemScreen(items, o.s.items?.pick, (say as? Say.Answer)?.line, nav.index, { nav = nav.select(it) }, onOpenItem ?: { item: ItemFact -> agent.openItem(o.s.id, item); Unit }, stale = o.stale)
+                            items.isNotEmpty() -> ItemScreen(items, o.s.items?.pick, (say as? Say.Answer)?.line, nav.index, { nav = nav.select(it) }, onOpenItem ?: { item: ItemFact -> agent.openItem(o.s.id, item); Unit }, stale = o.stale,
+                                you = com.misura.phone.hands.NearYou.at(o.s.id, items.map { it.id }))
                         }
                     }
                 }

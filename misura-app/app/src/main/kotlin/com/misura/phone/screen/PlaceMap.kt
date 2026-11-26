@@ -40,17 +40,19 @@ const val MAP_TAG = "map"
 private class MapHolder {
     var map: MapLibreMap? = null
     var pending: (() -> Unit)? = null
-    var framedFor: List<String> = emptyList()
+    /** What the camera was last framed for: every pin's id and coordinates plus the "you" point; any change frames again. */
+    var framedFor: List<Any?> = emptyList()
     /** Marker id → place id, so a tap on a pin selects that place's card (item 7, Codex P2). */
     val byMarker = mutableMapOf<Long, String>()
 }
 
 /**
- * MapLibre map: paper pins for options, orange for the card you're on (design-system §4 Map). Re-applied whenever the
+ * MapLibre map: paper pins for options, orange for the card you're on, blue for [you] (design-system §4 Map). Re-applied whenever the
  * places or the selection change. Tapping it calls [onTap] (full screen); tapping a pin selects its place ([onSelect]). TalkBack: "Select <name>" per place.
+ * [you] (a near-me set's own fix, never stored) is drawn only beside pins, and the camera frames it with them.
  */
 @Composable
-fun PlaceMap(places: List<PlaceFact>, selected: String?, onTap: () -> Unit, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
+fun PlaceMap(places: List<PlaceFact>, selected: String?, onTap: () -> Unit, onSelect: (String) -> Unit, modifier: Modifier = Modifier, you: Pair<Double, Double>? = null) {
     val ctx = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val holder = remember { MapHolder() }
@@ -79,11 +81,15 @@ fun PlaceMap(places: List<PlaceFact>, selected: String?, onTap: () -> Unit, onSe
                 val m = map.addMarker(MarkerOptions().position(LatLng(p.lat!!, p.lng!!)).title(p.label).icon(icons.fromBitmap(dot(if (on) M.orange.toArgb() else M.paper.toArgb(), if (on) 44 else 34))))
                 holder.byMarker[m.id] = p.id
             }
-            val ids = pinned.map { it.id }
-            if (ids != holder.framedFor && pinned.isNotEmpty()) {
-                holder.framedFor = ids
-                map.moveCamera(if (pinned.size == 1) CameraUpdateFactory.newLatLngZoom(LatLng(pinned[0].lat!!, pinned[0].lng!!), 15.0)
-                    else CameraUpdateFactory.newLatLngBounds(LatLngBounds.Builder().includes(pinned.map { LatLng(it.lat!!, it.lng!!) }).build(), 120))
+            // The user's own spot: not a place, so no title, no card and no tap; under the pins' selection, never in byMarker.
+            if (you != null && pinned.isNotEmpty()) map.addMarker(MarkerOptions().position(LatLng(you.first, you.second)).icon(icons.fromBitmap(dot(M.you.toArgb(), 30))))
+            // Framed again whenever a pin moves or the "you" point comes or goes, not only when the ids change (Codex P2).
+            val frame = pinned.map { listOf(it.id, it.lat, it.lng) } + listOf(you.takeIf { pinned.isNotEmpty() })
+            if (frame != holder.framedFor && pinned.isNotEmpty()) {
+                holder.framedFor = frame
+                val points = pinned.map { LatLng(it.lat!!, it.lng!!) } + listOfNotNull(you?.let { LatLng(it.first, it.second) })
+                map.moveCamera(if (points.size == 1) CameraUpdateFactory.newLatLngZoom(points[0], 15.0)
+                    else CameraUpdateFactory.newLatLngBounds(LatLngBounds.Builder().includes(points).build(), 120))
             }
         }
         Unit

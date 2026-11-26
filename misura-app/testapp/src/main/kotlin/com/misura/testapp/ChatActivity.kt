@@ -163,7 +163,7 @@ class ChatActivity : Activity() {
     private fun showVenues() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 96, 32, 32) }
         col.addView(TextView(this).apply { text = "Venues"; textSize = 22f })
-        col.addView(TextView(this).apply { text = "Show gyms"; textSize = 14f; setOnClickListener { showGyms() } }) // small, high: the page has no scroll
+        col.addView(TextView(this).apply { text = "Show gyms"; textSize = 14f; setOnClickListener { byDistance = false; showGyms() } }) // small, high: the page has no scroll
         // The city it searches, like a sports-club app stuck on the account's city: typing another one moves the list there.
         val where = TextView(this).apply { text = "Venues in $city"; textSize = 16f }
         col.addView(android.widget.EditText(this).apply { setText(city); hint = "City"; textSize = 16f; addTextChangedListener(object : android.text.TextWatcher {
@@ -228,8 +228,15 @@ class ChatActivity : Activity() {
     private fun showGyms() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 96, 32, 32) }
         val d = resources.displayMetrics.density
-        col.addView(TextView(this).apply { text = "Gyms"; textSize = 22f; setPadding(0, 0, 0, 48) })
-        GYMS.forEachIndexed { k, (name, where) ->
+        col.addView(TextView(this).apply { text = "Gyms"; textSize = 22f; setPadding(0, 0, 0, 24) })
+        // The app's own controls: a distance sort (the default order is not by distance) and "Near me", which asks Android for location
+        // (a real permission question; the hand must never answer it). Small, on one row, so the first screen of tiles stays as it was.
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; setPadding(0, 0, 0, 24)
+            addView(TextView(context).apply { text = if (byDistance) "Sorted by distance" else "Sort: distance"; textSize = 14f; setPadding(0, 0, 48, 0); setOnClickListener { byDistance = true; showGyms() } })
+            addView(TextView(context).apply { text = "Near me"; textSize = 14f; setOnClickListener { requestPermissions(arrayOf(android.Manifest.permission.ACCESS_COARSE_LOCATION), 1) } })
+        })
+        (if (byDistance) GYMS.sortedBy { (_, where) -> GYM_METRES[where] ?: Double.MAX_VALUE } else GYMS).forEachIndexed { k, (name, where) ->
             col.addView(LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(ImageView(context).apply { setBackgroundColor((0xFF224466 + k * 0x101010).toInt()); importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES }, LinearLayout.LayoutParams(MATCH_PARENT, (140 * d).toInt()))
@@ -242,6 +249,9 @@ class ChatActivity : Activity() {
         onEnter = null; flip = null; swap = null
         setContentView(ScrollView(this).apply { addView(col) })
     }
+
+    /** The Gyms page lists by distance after "Sort: distance" was tapped (until the page is opened afresh from Venues). */
+    private var byDistance = false
 
     private fun showTall(twin: Boolean) {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 96, 32, 32) }
@@ -289,6 +299,10 @@ class ChatActivity : Activity() {
             "Gym River" to "Fitness · 3.4 km", "Gym Hall" to "Fitness · 400 m", "Gym Blank" to "Fitness", "Gym East" to "Fitness · 2,1 km",
             "Gym Tower" to "Fitness · 4.4 km", "Gym West" to "Fitness · 0.9 km", "Gym South" to "Fitness · 5 km", "Gym Lake" to "Fitness · 6.2 km",
             "Gym Hill" to "Fitness · 0.6 km", "Gym Far" to "Fitness · 7 km", "Gym Last" to "Fitness · 0.2 km")
+        /** Each tile's distance in metres for the distance sort; a tile with two distances or none goes last, as an app can't place it either. */
+        private val GYM_METRES = mapOf("Fitness · 2.6 km" to 2600.0, "Fitness · 1.8 km" to 1800.0, "Fitness · 3.4 km" to 3400.0, "Fitness · 400 m" to 400.0,
+            "Fitness · 2,1 km" to 2100.0, "Fitness · 4.4 km" to 4400.0, "Fitness · 0.9 km" to 900.0, "Fitness · 5 km" to 5000.0, "Fitness · 6.2 km" to 6200.0,
+            "Fitness · 0.6 km" to 600.0, "Fitness · 7 km" to 7000.0, "Fitness · 0.2 km" to 200.0)
         @Volatile var current: ChatActivity? = null; fun flipNow(rows: Boolean = false) { current?.let { a -> a.runOnUiThread { (if (rows) a.swap else a.flip)?.invoke() } } } }
 
     private fun showChat(name: String) {

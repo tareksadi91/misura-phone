@@ -19,6 +19,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.put
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -73,9 +74,10 @@ class HiddenChatTest {
 
     // Every hand a test makes is let go of at the end: a screen parked after things were found must not outlive its test.
     private val hands = mutableListOf<com.misura.phone.hands.UseApp>()
-    private fun mk(brain: com.misura.core.agent.Brain, maxActions: Int = 25, budgetMs: Long = 150_000, filesDir: java.io.File? = null, log: (String) -> Unit = {}, parkMs: Long = 5 * 60_000, whereNow: suspend () -> String? = { null }, pins: com.misura.phone.hands.ItemPins? = null) =
+    private fun mk(brain: com.misura.core.agent.Brain, maxActions: Int = 25, budgetMs: Long = 150_000, filesDir: java.io.File? = null, log: (String) -> Unit = {}, parkMs: Long = 5 * 60_000,
+        whereNow: suspend (Pair<Double, Double>?) -> String? = { null }, pins: com.misura.phone.hands.ItemPins? = null, here: suspend () -> Pair<Double, Double>? = { null }, timing: (String) -> Unit = {}) =
         // The app is one task: an earlier test hand's parked screen would still hold it, so a new hand starts after those are let go (the app has one hand).
-        runBlocking { hands.forEach { it.releaseParked() } }.let { com.misura.phone.hands.UseApp(screen, brain, maxActions = maxActions, budgetMs = budgetMs, filesDir = filesDir, log = log, parkMs = parkMs, whereNow = whereNow, pins = pins).also { hands += it } }
+        runBlocking { hands.forEach { it.releaseParked() } }.let { com.misura.phone.hands.UseApp(screen, brain, maxActions = maxActions, budgetMs = budgetMs, filesDir = filesDir, log = log, parkMs = parkMs, here = here, whereNow = whereNow, pins = pins, timing = timing).also { hands += it } }
 
     @After fun tearDown(): Unit = runBlocking { hands.forEach { runCatching { it.releaseParked() } }; opened.forEach { runCatching { screen.close(it) } } }
 
@@ -1437,7 +1439,7 @@ class HiddenChatTest {
     }
 
     /** A scripted model on the testapp Gyms page: opens it, says the area, then alternates recording with a swipe down. [onePerScreen] = only the first gym not yet recorded. */
-    private fun gymsBrain(prompts: MutableList<String>, onePerScreen: Boolean, near: Boolean = true) = object : com.misura.core.agent.Brain {
+    private fun gymsBrain(prompts: MutableList<String>, onePerScreen: Boolean, near: Boolean = true, sort: Boolean = false, fail: Boolean = false) = object : com.misura.core.agent.Brain {
         var recordNext = true
         override suspend fun next(system: String, turns: List<com.misura.core.agent.Turn>, tools: List<com.misura.core.agent.ToolSpec>): com.misura.core.agent.BrainReply {
             val t = turns.last().content.toString(); prompts += t
@@ -1447,7 +1449,9 @@ class HiddenChatTest {
             val calls = when {
                 "TestChat" in scr -> listOf(one("tap", args("i" to at(scr, "Venues"))))
                 "Show gyms" in scr -> listOf(one("tap", args("i" to at(scr, "Show gyms"))))
+                sort && "Sort: distance" in scr -> listOf(one("tap", args("i" to at(scr, "Sort: distance"))))
                 near && "area: " !in t -> listOf(one("area", args("text" to "Munich")))
+                fail && "recorded item" in t -> listOf(one("fail", args("reason" to "the app stopped")))
                 recordNext -> (if (onePerScreen) gyms.filter { (_, g) -> "recorded item: $g" !in t }.take(1) else gyms)
                     .map { (i, g) -> one("item", args("i" to i, "title" to g)) }.ifEmpty { listOf(one("scroll", args("direction" to "down"))) }
                 else -> listOf(one("scroll", args("direction" to "down")))
@@ -1488,13 +1492,72 @@ class HiddenChatTest {
         check((r["items"] as kotlinx.serialization.json.JsonArray).size in 2..9) { r.toString() }
     }
 
+    /**
+     * "Nearest" only from the app's own distance order (owner 26 Nov): on the Gyms page sorted by distance (the hand taps the app's
+     * "Sort: distance"), the recorded distances never go down, so the result says the first is the nearest the app has; the default
+     * order keeps "nearest first among those checked". Red on the prior source: no such order line.
+     */
+    @Test fun aNearRunOnTheAppsDistanceSortSaysTheFirstIsTheNearestItHas(): Unit = runBlocking {
+        val prompts = mutableListOf<String>()
+        val r = mk(gymsBrain(prompts, onePerScreen = false, sort = true), maxActions = 20, filesDir = ctx.filesDir, whereNow = { "Munich" }).run(goal("near_user" to true, "count" to 1))
+        check(r["error"] == null) { "$r\n${prompts.lastOrNull()}" }
+        fun JsonObject.s(k: String) = (this[k] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        r.s("order") shouldBe com.misura.phone.hands.UseApp.BY_DISTANCE
+        (itemsOf(r).first().s("title")) shouldBe "Gym Last" // 0.2 km: last in the app's default order, past where a capped run looks
+        // The same app without its sort: the nearest among those checked, never the nearest it has.
+        val unsorted = mk(gymsBrain(mutableListOf(), onePerScreen = false), maxActions = 20, filesDir = ctx.filesDir, whereNow = { "Munich" }).run(goal("near_user" to true, "count" to 1))
+        check(unsorted.s("order")?.startsWith("nearest first") == true) { unsorted.toString() }
+    }
+
+    /**
+     * The near hand starts at the user (owner 26 Nov): one look at the app's own controls for "around you, by distance", never a hunt through
+     * menus (24 Nov: "use the app's sort" sent the hand through menus in a shopping app), and a permission question is never answered.
+     * Both with a known and an unknown city. Red on the prior source: the prompt banned "near me" buttons and said nothing of distance.
+     */
+    @Test fun theNearHandLooksOnceForTheAppsDistanceListAndNeverAnswersAPermission(): Unit = runBlocking {
+        for (city in listOf("Munich", null)) {
+            val prompts = mutableListOf<String>()
+            val r = mk(brainOf({ t -> prompts += t; "done" to args("result" to "ok") }), maxActions = 2, whereNow = { city }).run(goal("near_user" to true))
+            check(r["error"] == null) { r.toString() }
+            val p = prompts.single()
+            for (w in listOf("one look at the controls in sight", "around the user's current position by distance", "before any keyword search",
+                "never hunt through menus", "only when it is sorted by distance", "never answer it: press back"))
+                check(w in p) { "missing \"$w\" (city=$city): $p" }
+            check("not with a 'use my location'" !in p) { p }
+        }
+    }
+
+    /**
+     * Location simply there (owner 26 Nov): with a fresh fix held from when Misura came to the front, a near run through the production reader
+     * ([com.misura.phone.brain.PhoneLocation.now]) uses it without a new request: the pins come out around that fix (the emulator's own location,
+     * if any, is elsewhere). The held fix is invented ([PHONE]); WarmFixTest counts the requests and checks a stale one is not used.
+     */
+    @Test fun aNearRunUsesTheFixHeldSinceMisuraCameToTheFront(): Unit = runBlocking {
+        val loc = com.misura.phone.brain.PhoneLocation
+        shell("pm grant ${ctx.packageName} android.permission.ACCESS_COARSE_LOCATION"); shell("cmd location set-location-enabled true") // a held fix needs location allowed and on
+        loc.held.keep(PHONE, android.os.SystemClock.elapsedRealtimeNanos())
+        val asked = mutableListOf<String>()
+        val r = mk(gymsBrain(mutableListOf(), onePerScreen = false), maxActions = 20, filesDir = ctx.filesDir, whereNow = { "Munich" }, pins = fakePlaces(asked), here = { loc.now(ctx) }).run(goal("near_user" to true, "count" to 1))
+        check(r["error"] == null) { r.toString() }
+        check(itemsOf(r).any { it["pin"] != null }) { "no pin: the run did not use the held fix: $r" }
+        loc.held.keep(0.0 to 0.0, 0) // left stale: no other test inherits it
+    }
+
+    /** No fix for the run: the map is asked nothing (pins need the run's own fix), and the run still returns its things. */
+    @Test fun aNearRunWithoutAFixLooksUpNoPins(): Unit = runBlocking {
+        val asked = mutableListOf<String>()
+        val r = mk(gymsBrain(mutableListOf(), onePerScreen = false), maxActions = 20, filesDir = ctx.filesDir, pins = fakePlaces(asked), here = { null }).run(goal("near_user" to true, "count" to 1))
+        check(r["error"] == null && itemsOf(r).isNotEmpty()) { r.toString() }
+        check(asked.isEmpty()) { "looked up without a fix: $asked" }
+    }
+
     /** The phone's fix in the pin tests: never in a result (only venue pins leave). */
     private val PHONE = 48.137154 to 11.576124
     /** [m] metres north of the phone, a few metres east (so neither coordinate is the phone's own). */
     private fun north(m: Double) = (PHONE.first + m / 111_195.0) to (PHONE.second + 0.0002)
     private fun place(name: String, at: Pair<Double, Double>) = """{"id":"${name.hashCode()}-${at.first}","displayName":{"text":"$name"},"location":{"latitude":${at.first},"longitude":${at.second}}}"""
     /** A stand-in for Places text search (the app allows no cleartext, so the HTTP POST itself is replaced): the gym fixtures' map. */
-    private fun fakePlaces(asked: MutableList<String>) = com.misura.phone.brain.PinLookup({ "fixture-token" }, { "fixture-project" }, { PHONE }, "https://places.invalid/v1") { url, headers, body ->
+    private fun fakePlaces(asked: MutableList<String>) = com.misura.phone.brain.PinLookup({ "fixture-token" }, { "fixture-project" }, "https://places.invalid/v1") { url, headers, body ->
         check(url == "https://places.invalid/v1/places:searchText" && headers["Authorization"] == "Bearer fixture-token") { url }
         val q = (kotlinx.serialization.json.Json.parseToJsonElement(body) as JsonObject)["textQuery"].toString().trim('"')
         synchronized(asked) { asked += q }
@@ -1514,8 +1577,10 @@ class HiddenChatTest {
      */
     @Test fun aNearRunGivesTheNearestFoundVenuesACertainPinOrSaysWhyNot(): Unit = runBlocking {
         val prompts = mutableListOf<String>(); val asked = mutableListOf<String>()
-        val r = mk(gymsBrain(prompts, onePerScreen = false), maxActions = 20, filesDir = ctx.filesDir, whereNow = { "Munich" }, pins = fakePlaces(asked)).run(goal("near_user" to true, "count" to 1))
+        var reads = 0
+        val r = mk(gymsBrain(prompts, onePerScreen = false), maxActions = 20, filesDir = ctx.filesDir, whereNow = { "Munich" }, pins = fakePlaces(asked), here = { reads++; PHONE }).run(goal("near_user" to true, "count" to 1))
         check(r["error"] == null) { "$r\n${prompts.lastOrNull()}" }
+        reads shouldBe 1 // one location read per run: the city and the pins share it (26 Nov; before, the city and the pin lookup each read one)
         val items = (r["items"] as kotlinx.serialization.json.JsonArray).associate { o -> o as JsonObject; (o["title"] as kotlinx.serialization.json.JsonPrimitive).content to o }
         fun pin(t: String) = items.getValue(t)["pin"] as? JsonObject
         fun why(t: String) = (items.getValue(t)["noPin"] as? kotlinx.serialization.json.JsonPrimitive)?.content
@@ -1568,6 +1633,144 @@ class HiddenChatTest {
         asked shouldBe false
         check(offered.isNotEmpty() && "area" !in offered) { offered.toString() }
         check(r["searchArea"] == null && prompts.none { "Near the user" in it }) { r.toString() }
+    }
+
+
+    /**
+     * The run's fix stays on the phone (owner rule, item 7a): a near run through the real Agent → use_app → UseApp.run, then a failing one.
+     * The fix (synthetic, distinct from every venue) never shows in the hand model's input, the main model's input, the tool result, the
+     * persisted session or its turns, or the log lines of the runs; it is kept only in memory for the map's dot (NearYou), for that session's set.
+     */
+    @Test fun theRunsFixNeverLeavesThePhoneButDrawsTheDot(): Unit = runBlocking {
+        val fix = listOf(PHONE.first.toString(), PHONE.second.toString())
+        val handSaw = mutableListOf<String>(); val logs = java.util.Collections.synchronizedList(mutableListOf<String>())
+        fun handBrain(fail: Boolean) = object : com.misura.core.agent.Brain {
+            val inner = gymsBrain(mutableListOf(), onePerScreen = false, fail = fail)
+            override suspend fun next(system: String, turns: List<com.misura.core.agent.Turn>, tools: List<com.misura.core.agent.ToolSpec>): com.misura.core.agent.BrainReply {
+                handSaw += system; handSaw += turns.joinToString { it.content.toString() }; handSaw += tools.joinToString { it.toString() }
+                return inner.next(system, turns, tools)
+            }
+        }
+        val dbName = "near-privacy-test.db"; ctx.deleteDatabase(dbName)
+        val db = com.misura.phone.store.MisuraDb.open(ctx, dbName)
+        try {
+            val store = com.misura.phone.store.RoomSessionStore(db)
+            val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+            for (fail in listOf(false, true)) {
+                val asked = mutableListOf<String>()
+                val hand = mk(handBrain(fail), maxActions = 20, filesDir = ctx.filesDir, whereNow = { "Munich" }, pins = fakePlaces(asked), here = { PHONE },
+                    log = { logs += it; android.util.Log.i("MisuraAgent", it) }, timing = { logs += it; android.util.Log.i("MisuraTiming", it) })
+                val mainSaw = mutableListOf<String>()
+                val replies = ArrayDeque(listOf<() -> com.misura.core.agent.BrainReply>(
+                    { val a = args("app" to TEST_PKG, "goal" to "gyms near me", "near_user" to true, "count" to 1)
+                      com.misura.core.agent.BrainReply.Calls(kotlinx.serialization.json.buildJsonObject { put("role", "model"); put("parts", kotlinx.serialization.json.buildJsonArray { add(kotlinx.serialization.json.buildJsonObject { put("functionCall", kotlinx.serialization.json.buildJsonObject { put("name", "use_app"); put("args", a) }) }) }) },
+                        listOf(com.misura.core.agent.ToolCall(null, "use_app", a))) },
+                    { com.misura.core.agent.BrainReply.Text(kotlinx.serialization.json.buildJsonObject { put("role", "model"); put("parts", kotlinx.serialization.json.buildJsonArray { add(kotlinx.serialization.json.buildJsonObject { put("text", "Gym Hall is the nearest of those checked.") }) }) }, "Gym Hall is the nearest of those checked.") }))
+                val main = object : com.misura.core.agent.Brain {
+                    override suspend fun next(system: String, turns: List<com.misura.core.agent.Turn>, tools: List<com.misura.core.agent.ToolSpec>): com.misura.core.agent.BrainReply {
+                        mainSaw += system; mainSaw += turns.joinToString { it.content.toString() }; return replies.removeFirst()()
+                    }
+                }
+                val agent = com.misura.core.agent.Agent(store, main, listOf(hand), System::currentTimeMillis, scope, turnTimeoutMs = 300_000)
+                shell("logcat -c")
+                val id = agent.start("gyms near me")
+                var ended = false
+                repeat(900) { if (!ended) { ended = store.load(id)?.status != com.misura.core.agent.SessionStatus.THINKING; if (!ended) delay(200) } }
+                check(ended) { "turn never ended" }
+                val session = store.load(id)!!
+                val turns = store.turns(id).joinToString { it.content.toString() }
+                val logcat = shell("logcat -d -v raw")
+                check(turns.contains("\"items\"") && turns.contains("Gym Hall")) { "the run found nothing (fail=$fail): $turns" }
+                check(asked.isNotEmpty()) { "no pin was looked up: the fix did not reach the pins (fail=$fail)" }
+                for ((where, text) in listOf("hand model" to handSaw.joinToString("\n"), "main model" to mainSaw.joinToString("\n"), "session" to session.toString(),
+                    "turns" to turns, "log" to logs.joinToString("\n"), "logcat" to logcat))
+                    for (f in fix) check(f !in text) { "the fix ($f) is in the $where (fail=$fail)" }
+                check(logs.any { it.startsWith("use_app near total=") && "location_wait=" in it }) { logs.toString() }
+                // The dot: kept in memory for this session's set only.
+                val ids = Regex(""""id":"([0-9a-f-]{36})"""").findAll(turns).map { it.groupValues[1] }.distinct().toList()
+                check(ids.isNotEmpty()) { turns }
+                com.misura.phone.hands.NearYou.at(id, ids) shouldBe PHONE
+                com.misura.phone.hands.NearYou.at("another-session", ids) shouldBe null
+                handSaw.clear(); logs.clear()
+            }
+        } finally { db.close(); ctx.deleteDatabase(dbName) }
+    }
+
+    // ---- A permission question on the hidden screen is never answered (owner rule 26 Nov: "near me" may use the app's own location controls) ----
+
+    private val COARSE = android.Manifest.permission.ACCESS_COARSE_LOCATION
+    private fun denyLocation() { shell("pm revoke $TEST_PKG $COARSE"); shell("pm clear-permission-flags $TEST_PKG $COARSE user-set user-fixed one-time") }
+    private fun locationGranted() = ctx.packageManager.checkPermission(COARSE, TEST_PKG) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    /**
+     * Centre of the permission dialog's grant button on [display], found by the test's own UiAutomation (an accessibility tool: Misura's
+     * service gets the dialog's window closed). Null = no such dialog there.
+     */
+    private fun grantButton(display: Int): Pair<Int, Int>? {
+        val ui = inst.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
+        ui.serviceInfo = ui.serviceInfo.apply { flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS }
+        val grant = Regex("(?i)^(while using the app|only this time|allow)$")
+        fun find(n: android.view.accessibility.AccessibilityNodeInfo?): android.view.accessibility.AccessibilityNodeInfo? {
+            n ?: return null
+            if (n.isClickable && (grant.matches(n.text?.toString().orEmpty()) || (0 until n.childCount).any { grant.matches(n.getChild(it)?.text?.toString().orEmpty()) })) return n
+            return (0 until n.childCount).firstNotNullOfOrNull { find(n.getChild(it)) }
+        }
+        val b = ui.windowsOnAllDisplays.get(display).orEmpty().firstNotNullOfOrNull { find(it.root) } ?: return null
+        val r = android.graphics.Rect().also { b.getBoundsInScreen(it) }
+        return r.centerX() to r.centerY()
+    }
+    /** Opens the Gyms page on a fresh hidden screen and taps its "Near me", which asks Android for location. */
+    private suspend fun permissionQuestionUp(): Pair<DisplaySession, Pair<Int, Int>> {
+        denyLocation()
+        val s = screen.open(1080, 2400, 480).also { opened += it }
+        screen.launch(s, TEST_PKG) shouldBe true
+        suspend fun tapWords(w: String) {
+            var e: com.misura.phone.hands.Seen? = null
+            check(waitFor { e = ScreenReader.read(s)?.let { com.misura.phone.hands.flatten(it, 1080, 2400) }?.firstOrNull { it.words == w }; e != null }) { "no $w" }
+            HiddenInput.tap(s, (e!!.bounds[0] + e!!.bounds[2]) / 2, (e!!.bounds[1] + e!!.bounds[3]) / 2) shouldBe true
+        }
+        tapWords("Venues"); tapWords("Show gyms"); tapWords("Near me")
+        var at: Pair<Int, Int>? = null
+        repeat(50) { if (at == null) { at = grantButton(s.displayId); if (at == null) delay(200) } }
+        return s to checkNotNull(at) { "no permission question on the hidden screen: ${ScreenReader.describe(s.displayId)}" }
+    }
+
+    /**
+     * At injection time, with a permission question up, a tap on its grant button, a swipe and any key but Back are refused; Back goes through.
+     * The location permission stays denied. Red on the prior source (emulator, Android 17): the tap was sent (the dialog itself drops touches
+     * from an accessibility service), and Tab then Enter on the hidden display (keys go in through the shell, which the dialog takes) granted it.
+     */
+    @Test fun nothingButBackReachesAPermissionQuestion(): Unit = runBlocking {
+        val (s, at) = permissionQuestionUp()
+        HiddenInput.tap(s, at.first, at.second) shouldBe false
+        HiddenInput.swipe(s, at.first, at.second, at.first, at.second - 300) shouldBe false
+        screen.key(s, 61) shouldBe false
+        screen.key(s, 66) shouldBe false
+        delay(1_500)
+        locationGranted() shouldBe false
+        screen.key(s, 4) shouldBe true
+        check(waitFor { grantButton(s.displayId) == null }) { "back did not close the question" }
+        locationGranted() shouldBe false
+    }
+
+    /**
+     * Through real UseApp.run: the hand taps the app's "Near me", Android asks for location on the hidden screen, the hand can't read it and
+     * presses back (never answers it), and goes on; the permission stays denied. A model that names the grant button anyway gets nothing pressed.
+     * Not red on the prior source: there the dialog is also unreadable (closed to Misura's service), so the prior hand could not point at it either;
+     * the injection guard above is the part that was missing.
+     */
+    @Test fun aNearRunNeverAnswersAPermissionQuestion(): Unit = runBlocking {
+        denyLocation()
+        val prompts = mutableListOf<String>()
+        val brain = brainOf(
+            { t -> prompts += t; "tap" to args("i" to at(t, "Venues")) },
+            { t -> prompts += t; "tap" to args("i" to at(t, "Show gyms")) },
+            { t -> prompts += t; "tap" to args("i" to at(t, "Near me")) },
+            // The dialog can take a moment to come up: wait until the hand has met it (it can't read it, so it presses back itself).
+            { t -> prompts += t; if ("a system prompt covered the app" in t) "done" to args("result" to "gyms") else "wait" to args() })
+        val r = mk(brain, maxActions = 10, whereNow = { "Munich" }).run(goal("near_user" to true))
+        check(r["error"] == null) { "$r\n${prompts.lastOrNull()}" }
+        check("a system prompt covered the app; pressed back" in prompts.last()) { prompts.last() }
+        locationGranted() shouldBe false
     }
 
     companion object {

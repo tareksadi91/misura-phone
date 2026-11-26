@@ -27,7 +27,7 @@ class ShortcutStore(ctx: Context) {
     private fun read(): List<Shortcut>? = prefs.getString(KEY, null)?.let { runCatching { json.decodeFromString(ser, it) }.getOrNull() } ?: if (prefs.contains(KEY)) null else emptyList()
     private fun writable(): List<Shortcut> = read() ?: throw StorageUnavailableException()
     private fun write(list: List<Shortcut>) {
-        check(prefs.edit().putString(KEY, json.encodeToString(ser, list)).commit()) { "shortcuts not saved" }
+        if (!prefs.edit().putString(KEY, json.encodeToString(ser, list)).commit()) throw StorageUnavailableException()
         CHANGES.value += 1
     }
 

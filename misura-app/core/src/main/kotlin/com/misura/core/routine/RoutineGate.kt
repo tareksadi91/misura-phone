@@ -16,8 +16,9 @@ fun Routine.digest(): String {
  * does exactly what the card showed (it does not depend on the model calling again). Only the card callback calls
  * [answered]; tool arguments can never grant it. A later call for the same thing in the same session gets the earlier
  * outcome instead of a second card. In memory only: a restart forgets an unanswered card.
+ * [prefix] starts every card id ("rt:…"), so the app routes a tap to the tool that asked: each tool using a gate gets its own.
  */
-class RoutineGate(private val clock: () -> Long = System::currentTimeMillis, private val validMs: Long = 5 * 60_000) {
+class RoutineGate(private val clock: () -> Long = System::currentTimeMillis, private val validMs: Long = 5 * 60_000, private val prefix: String = "rt") {
     sealed interface Result {
         data class Ask(val id: String) : Result
         /** The tap already did it; [summary] says what. */
@@ -56,7 +57,7 @@ class RoutineGate(private val clock: () -> Long = System::currentTimeMillis, pri
         val key = "$session|$what"
         done[key]?.let { return Result.Done(it.second) }
         pending.removeAll { it.key.startsWith("$session|") } // one open card per session: the newest
-        val id = "rt:${UUID.randomUUID()}"
+        val id = "$prefix:${UUID.randomUUID()}"
         pending += Pending(id, key, clock() + validMs, go)
         return Result.Ask(id)
     }

@@ -112,8 +112,7 @@ object MisuraGraph {
         shortcuts = com.misura.phone.shortcut.ShortcutStore(app)
         val shortcutTool = com.misura.phone.shortcut.ShortcutTool(shortcuts,
             com.misura.phone.shortcut.controllerSteps(sessions, tasks::load, controller::isChecking), appLabel)
-        val gates = CardGates(GateOwner(calendar::answered, calendar::stopped), GateOwner(routineTool::answered, routineTool::stopped, routineTool::outcome),
-            GateOwner(shortcutTool::answered, shortcutTool::stopped, shortcutTool::outcome), GateOwner(useApp::answered, useApp::stopped))
+        val gates = cardGates(calendar, routineTool, shortcutTool, useApp)
         agent = Agent(sessions, ConfiguredBrain, listOf(com.misura.phone.notify.ReadNotifications(app), places, lookup, com.misura.phone.brain.Remember(brainPrefs), useApp, com.misura.phone.hands.OpenApp(app, { apps }) { bringParked(it) }, calendar, com.misura.phone.hands.Contacts(app), com.misura.core.agent.Directions({ url -> openDirections(app, url) }), routineTool, shortcutTool), System::currentTimeMillis, scope, turnTimeoutMs = 300_000, callTimeoutMs = 60_000, // the call after a long app run carries its items and was timing out at 30 s on a slow evening
             turnContext = routes::capture,
             onSettled = settled, onAllSent = allSent, // result / needs-you alerts (SYSTEM §5 M3)

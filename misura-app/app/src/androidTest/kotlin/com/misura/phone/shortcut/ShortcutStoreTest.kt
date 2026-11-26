@@ -61,4 +61,14 @@ class ShortcutStoreTest {
         assertThrows(StorageUnavailableException::class.java) { store.used("a", 1) }
         prefs.getString("all", null) shouldBe "{not json"
     }
+
+    /** Codex P2: a value of the wrong type under the key (not a string at all) is unreadable too, not a crash. */
+    @Test fun wrongTypeStoreBlocksWrites() {
+        prefs.edit().putInt("all", 7).commit()
+        store.all() shouldBe emptyList()
+        assertThrows(StorageUnavailableException::class.java) { store.keep(sc("a"), null) }
+        assertThrows(StorageUnavailableException::class.java) { store.remove("a") }
+        assertThrows(StorageUnavailableException::class.java) { store.used("a", 1) }
+        prefs.all["all"] shouldBe 7
+    }
 }

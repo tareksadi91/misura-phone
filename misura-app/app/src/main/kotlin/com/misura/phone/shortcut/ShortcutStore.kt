@@ -23,8 +23,9 @@ class ShortcutStore(ctx: Context) {
 
     // One lock for every instance: whole-list read-modify-write never interleaves.
     private inline fun <T> locked(f: () -> T): T = synchronized(LOCK, f)
-    /** Null = stored but unreadable. */
-    private fun read(): List<Shortcut>? = prefs.getString(KEY, null)?.let { runCatching { json.decodeFromString(ser, it) }.getOrNull() } ?: if (prefs.contains(KEY)) null else emptyList()
+    /** Null = stored but unreadable: broken JSON, or a value of another type under the key (getString throws then, Codex P2). */
+    private fun read(): List<Shortcut>? = if (!prefs.contains(KEY)) emptyList()
+        else runCatching { json.decodeFromString(ser, prefs.getString(KEY, null)!!) }.getOrNull()
     private fun writable(): List<Shortcut> = read() ?: throw StorageUnavailableException()
     private fun write(list: List<Shortcut>) {
         if (!prefs.edit().putString(KEY, json.encodeToString(ser, list)).commit()) throw StorageUnavailableException()

@@ -798,8 +798,9 @@ private fun Home(rows: List<Row>, now: Long, modifier: Modifier, shortcuts: List
     val locale = java.util.Locale.getDefault()
     val date = java.text.SimpleDateFormat(android.text.format.DateFormat.getBestDateTimePattern(locale, "EEEEdMMMM"), locale).format(Date(now))
     val open = rows.filter { it.visibleOnHome }
-    val yoursAll = open.filter { it.kind == com.misura.core.agent.HomeKind.YOURS }.take(3)
-    val failedAll = open.filter { it.kind == com.misura.core.agent.HomeKind.FAILED }.take(2)
+    // No caps per kind: the four-line budget in homeFit is the only cap, so a task always outranks a shortcut (Codex P1).
+    val yoursAll = open.filter { it.kind == com.misura.core.agent.HomeKind.YOURS }
+    val failedAll = open.filter { it.kind == com.misura.core.agent.HomeKind.FAILED }
     val running = open.filter { it.kind == com.misura.core.agent.HomeKind.RUNNING }
     val runningName = if (running.size == 1) running[0].name else "Working on ${running.size} things"
     val allOpen = rows.count { it.kind != com.misura.core.agent.HomeKind.DONE }

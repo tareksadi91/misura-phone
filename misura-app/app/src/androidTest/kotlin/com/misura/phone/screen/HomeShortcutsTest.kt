@@ -188,6 +188,25 @@ class HomeShortcutsTest {
         rule.onNodeWithText("Earlier · 2 still open ›").assertExists()
     }
 
+    /** Codex P1: four ready tasks take all four lines; no separate cap of 3 lets a shortcut in ahead of the fourth. Nothing is hidden. */
+    @Test fun fourReadyTasksBeatAShortcut() {
+        repeat(4) { ready("y$it") }; keep("Club check-in")
+        show(); waitFor(hasText("Earlier", substring = true)); waitFor(anyLine, 4); Thread.sleep(500); rule.waitForIdle()
+        rule.onAllNodes(hasContentDescription(", ready for your go", substring = true)).assertCountEquals(4)
+        rule.onAllNodes(shortcutLine).assertCountEquals(0)
+        rule.onNodeWithText("Earlier ›").assertExists()
+    }
+
+    /** Codex P1: three failed tasks all show (no separate cap of 2), and the one line left goes to the shortcut. */
+    @Test fun threeFailedThenOneShortcut() {
+        repeat(3) { failed("f$it") }; keep("One"); keep("Two")
+        show(); waitFor(hasText("Earlier", substring = true)); waitFor(anyLine, 4); Thread.sleep(500); rule.waitForIdle()
+        rule.onAllNodes(hasContentDescription(", failed", substring = true)).assertCountEquals(3)
+        rule.onAllNodes(shortcutLine).assertCountEquals(1)
+        rule.onAllNodes(line("Two")).assertCountEquals(0)
+        rule.onNodeWithText("Earlier ›").assertExists()
+    }
+
     /** Shortcuts fill what tasks leave, at most 3; they are never counted as "still open". */
     @Test fun shortcutsFillWhatTasksLeaveAndNeverCountAsOpen() {
         repeat(2) { ready("y$it") }; keep("One"); keep("Two"); keep("Three")
@@ -304,6 +323,16 @@ class HomeShortcutsTest {
         Thread.sleep(600); rule.waitForIdle()
         rule.onAllNodes(shortcutLine).assertCountEquals(0)
         rule.onNodeWithText("Type a request…").assertExists()
+    }
+
+    /** Codex P2: a non-string under the key (another type, not broken JSON) leaves Home as with no shortcuts. */
+    @Test fun wrongTypeStoreDoesNotCrashHome() {
+        prefs().edit().putInt("all", 7).commit()
+        show(); waitFor(headline)
+        Thread.sleep(600); rule.waitForIdle()
+        rule.onAllNodes(shortcutLine).assertCountEquals(0)
+        rule.onNodeWithText("Type a request…").assertExists()
+        prefs().all["all"] shouldBe 7
     }
 
     /** Spec Home 7 + F3: a Home with only shortcuts is populated: the quiet texture, no first-use hint. */

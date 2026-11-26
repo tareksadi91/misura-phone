@@ -22,3 +22,9 @@ internal class CardGates(private val calendar: GateOwner, private val routine: G
     val chooseNote: (Say.Question, Int) -> String? = { q, _ -> q.gate?.takeIf { it.startsWith("rt:") || it.startsWith("sc:") }?.let { owner(it).outcome(it) } }
     val onStopped: () -> Unit = { calendar.stopped(); useApp.stopped(); routine.stopped(); shortcut.stopped() }
 }
+
+/** The four owners as [MisuraGraph] wires them: each tool's own answered / stopped (/ outcome). One place, so a test builds exactly this. */
+internal fun cardGates(calendar: com.misura.phone.hands.Calendar, routine: com.misura.phone.routine.RoutineTool,
+    shortcut: com.misura.phone.shortcut.ShortcutTool, useApp: com.misura.phone.hands.UseApp) =
+    CardGates(GateOwner(calendar::answered, calendar::stopped), GateOwner(routine::answered, routine::stopped, routine::outcome),
+        GateOwner(shortcut::answered, shortcut::stopped, shortcut::outcome), GateOwner(useApp::answered, useApp::stopped))

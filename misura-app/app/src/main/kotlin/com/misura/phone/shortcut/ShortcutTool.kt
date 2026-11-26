@@ -46,9 +46,9 @@ class ShortcutTool(
     private val clock: () -> Long = System::currentTimeMillis,
 ) : Tool {
     override val spec = ToolSpec("shortcut",
-        "Keep a request on Home so the user can run it again with one tap. Only when the user asks for a shortcut, and only after the task worked in this conversation. " +
+        "Keep a request on Home so the user can run it again with one tap. Only when the user asks for a shortcut. If the task has not run in this conversation yet, do it first with your other tools (exactly as if the user had asked for it), then call add; never send the user away to do it themselves. " +
             "action=add with title (a few words shown on Home, at most ${Shortcut.MAX_TITLE} characters) and prompt (the request exactly as it should run again, self-contained, at most ${Shortcut.MAX_PROMPT} characters). " +
-            "It is refused until a run in this conversation worked in an app. Home keeps at most ${Shortcut.MAX}; when full, the card says which one it replaces. " +
+            "add is refused until a run in this conversation worked in an app; if the run failed, say so instead. Home keeps at most ${Shortcut.MAX}; when full, the card says which one it replaces. " +
             "This shows a card; the user's tap keeps it. The app then tells you what the tap did: say only that, in two or three words. " +
             "action=list shows kept shortcuts; action=remove with id removes one (also after a tap).",
         schema("action" to "string", "title" to "string", "prompt" to "string", "id" to "string", required = listOf("action")))

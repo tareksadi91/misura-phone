@@ -413,6 +413,27 @@ class HiddenChatTest {
         itemsOf(r).map { prim(it, "title") } shouldBe listOf("Blue lamp")
     }
 
+    /**
+     * Phone 26 Nov: the system took a tap and never answered it; the hand waited until the run's outer limit stopped it, and the gyms it had
+     * recorded were lost. A tap with no answer now fails that tap only: the run goes on, ends on its own budget and keeps what it recorded.
+     */
+    @Test fun aTapTheSystemNeverAnswersFailsThatTapAndTheRunKeepsWhatItRecorded(): Unit = runBlocking {
+        val real = HiddenInput.send; var sent = 0
+        HiddenInput.send = { svc, g, cb -> if (sent++ == 0) real(svc, g, cb) else true } // the first tap goes through; later ones are taken and never answered
+        try {
+            val open = { t: String -> "tap" to args("i" to at(t, "Shop")) }
+            val told = mutableListOf<String>()
+            val hand = mk(brainOf(open, { "item" to args("i" to at(it, "Blue lamp"), "title" to "Blue lamp", "price" to "12 €") }, { told += it; "tap" to args("i" to at(it, "Blue lamp")) }),
+                maxActions = 40, budgetMs = 10_000, filesDir = ctx.filesDir)
+            val t0 = System.nanoTime()
+            val r = hand.run(goal())
+            prim(r, "error")!!.lineSequence().first() shouldBe "took too long"
+            itemsOf(r).map { prim(it, "title") } shouldBe listOf("Blue lamp")
+            check(told.drop(1).any { "did not go through" in it }) { told.lastOrNull().orEmpty() }
+            check((System.nanoTime() - t0) / 1_000_000 < 10_000 + HiddenInput.GESTURE_GRACE_MS + 5_000) { "ran ${(System.nanoTime() - t0) / 1_000_000} ms" }
+        } finally { HiddenInput.send = real }
+    }
+
     /** All calls of a reply are items: each is recorded against the same frame, one "Done so far" line each. */
     @Test fun severalItemsInOneReplyAreAllRecorded(): Unit = runBlocking {
         var told = ""

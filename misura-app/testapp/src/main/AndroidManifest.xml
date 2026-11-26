@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Asked for by the Gyms page's "Near me" (a real runtime permission question on the hidden screen); never granted by a test. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <application android:label="TestChat" android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity android:name=".ChatActivity" android:exported="true">
             <intent-filter>

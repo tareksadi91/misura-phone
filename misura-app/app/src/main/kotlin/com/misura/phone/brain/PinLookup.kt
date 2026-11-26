@@ -36,14 +36,11 @@ import kotlin.math.sqrt
 class PinLookup(
     private val tokens: TokenProvider,
     private val project: () -> String,
-    /** Where the phone is now (fresh fix only), or null: then nothing is looked up. */
-    private val here: suspend () -> Pair<Double, Double>?,
     private val placesBase: String = PLACES_BASE,
     /** The HTTP POST (url, headers, body) → status, body; tests on the emulator stand in for Places here (the app allows no cleartext). */
     private val post: suspend (String, Map<String, String>, String) -> Pair<Int, String> = { url, headers, body -> http("POST", url, headers, body, timeoutMs = 4_000) },
 ) : ItemPins {
-    override suspend fun find(asks: List<PinAsk>, city: String?, got: (String, PinFound) -> Unit) {
-        val at = here() ?: return
+    override suspend fun find(asks: List<PinAsk>, city: String?, at: Pair<Double, Double>, got: (String, PinFound) -> Unit) {
         // A token exchange is blocking network work: it runs off this coroutine, so the caller's time limit is not held up by it.
         val token = CoroutineScope(Dispatchers.IO).async { tokens.token() }.await() ?: return
         val project = project()
@@ -89,10 +86,10 @@ class PinLookup(
  * The pin lookup a turn may use: its captured Google route ([ModelRouteContext], as find_places), resolved when the lookup runs. No Google
  * access on the route (or no route) = nothing is looked up.
  */
-internal fun routedPins(here: suspend () -> Pair<Double, Double>?, placesBase: String = PinLookup.PLACES_BASE) = ItemPins { asks, city, got ->
+internal fun routedPins(placesBase: String = PinLookup.PLACES_BASE) = ItemPins { asks, city, at, got ->
     val ctx = coroutineContext[ModelRouteContext] ?: return@ItemPins
     if (!ctx.route.googleAvailable) return@ItemPins
-    PinLookup(ctx.google.tokens, { ctx.google.project }, here, placesBase).find(asks, city, got)
+    PinLookup(ctx.google.tokens, { ctx.google.project }, placesBase).find(asks, city, at, got)
 }
 
 /** The certain-pin rule's two checks (owner, 25 Nov: "certain pin"; strict after the Codex Sol audit: certainty over recall). */

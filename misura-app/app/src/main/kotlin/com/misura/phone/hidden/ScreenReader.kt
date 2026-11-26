@@ -122,6 +122,15 @@ object ScreenReader {
     /** True when [pkg] has a window on the main screen: the user is using it, so hands stay away. */
     fun userIsInApp(pkg: String): Boolean = windows(0).any { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.root?.packageName == pkg }
 
+    /**
+     * A permission question is up on [displayId]: an app window there belongs to a permission controller, or is closed to screen readers
+     * (Android's own permission dialog is, to a service that is not an accessibility tool: only its title shows). On such a screen the hand
+     * may only press Back; [HiddenInput] and [ShizukuHiddenScreen.key] refuse everything else at injection time (owner rule 26 Nov).
+     */
+    fun permissionQuestion(displayId: Int): Boolean = windows(displayId).any { w ->
+        w.type == AccessibilityWindowInfo.TYPE_APPLICATION && w.root.let { it == null || it.packageName?.toString().orEmpty().endsWith("permissioncontroller") }
+    }
+
     internal fun root(displayId: Int): AccessibilityNodeInfo? =
         windows(displayId).firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }?.root
 

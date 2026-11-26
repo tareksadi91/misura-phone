@@ -35,4 +35,12 @@ class PhoneLocationTest {
         shell("cmd location set-location-enabled false")
         try { assertNull(PhoneLocation.now(ctx)) } finally { shell("cmd location set-location-enabled true") }
     }
+
+    /** A fix held from when Misura came to the front is not used once location is switched off (or the permission withdrawn): off means off. */
+    @Test fun aHeldFixIsNotUsedOnceLocationIsOff() = runBlocking {
+        shell("pm grant ${ctx.packageName} android.permission.ACCESS_COARSE_LOCATION")
+        PhoneLocation.held.keep(10.5 to 20.25, android.os.SystemClock.elapsedRealtimeNanos())
+        shell("cmd location set-location-enabled false")
+        try { assertNull(PhoneLocation.now(ctx)) } finally { shell("cmd location set-location-enabled true"); PhoneLocation.held.keep(0.0 to 0.0, 0) } // left stale for the next test
+    }
 }

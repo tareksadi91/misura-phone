@@ -149,4 +149,76 @@ class ItemCardsTest {
         val h = listOf("full", "why", "bare").map { t -> rule.onNodeWithTag(t).getBoundsInRoot().let { (it.bottom - it.top).value } }
         check(h.max() - h.min() < 0.5f) { "heights full/why/bare (dp): $h" }
     }
+
+    // ---- The "you" dot (owner 26 Nov: "near me" starts at my location). Need the map style from the network, like the pin tap. ----
+
+    /** The run's fix in these tests: invented, a few km from every venue of [near]. */
+    private val you = 48.1201 to 11.5302
+
+    private fun mapView(): org.maplibre.android.maps.MapView {
+        val inst = InstrumentationRegistry.getInstrumentation()
+        var found: org.maplibre.android.maps.MapView? = null
+        inst.runOnMainSync {
+            val a = androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).single()
+            fun find(v: android.view.View): org.maplibre.android.maps.MapView? = v as? org.maplibre.android.maps.MapView
+                ?: (v as? android.view.ViewGroup)?.let { g -> (0 until g.childCount).firstNotNullOfOrNull { find(g.getChildAt(it)) } }
+            found = find(a.window.decorView)
+        }
+        return checkNotNull(found)
+    }
+    /** The map's markers (title, position) and whether each of [points] is inside what the camera shows, once the map is up. */
+    private fun look(points: List<Pair<Double, Double>>): Pair<List<Pair<String?, Pair<Double, Double>>>, List<Boolean>>? {
+        val inst = InstrumentationRegistry.getInstrumentation()
+        var out: Pair<List<Pair<String?, Pair<Double, Double>>>, List<Boolean>>? = null
+        val view = mapView()
+        inst.runOnMainSync { view.getMapAsync { m ->
+            if (m.style?.isFullyLoaded != true) return@getMapAsync
+            val region = m.projection.visibleRegion.latLngBounds
+            out = m.markers.map { it.title?.takeIf { t -> t.isNotEmpty() } to (it.position.latitude to it.position.longitude) } to
+                points.map { region.contains(org.maplibre.android.geometry.LatLng(it.first, it.second)) }
+        } }
+        inst.waitForIdleSync()
+        return out
+    }
+    private fun awaitLook(points: List<Pair<Double, Double>>, ok: (Pair<List<Pair<String?, Pair<Double, Double>>>, List<Boolean>>) -> Boolean): Pair<List<Pair<String?, Pair<Double, Double>>>, List<Boolean>> {
+        var last: Pair<List<Pair<String?, Pair<Double, Double>>>, List<Boolean>>? = null
+        rule.waitUntil(20_000) { last = look(points); last?.let(ok) == true }
+        return last!!
+    }
+
+    /** A near set with the run's fix: a dot without a title (not a place, no card) and a camera that shows it and the pin. Red on prior: no dot. */
+    @Test fun aNearMapShowsYouAndFramesYouWithThePins() {
+        rule.setContent { MisuraSurface { Box(Modifier.fillMaxSize()) { ItemScreen(near(), "A1", null, 0, {}, {}, onDirections = {}, you = you) } } }
+        val pin = 48.1482 to 11.5761
+        val (markers, inside) = awaitLook(listOf(pin, you)) { (m, i) -> m.any { it.first == null } && i.all { it } }
+        markers.count { it.first == null } shouldBe 1
+        markers.single { it.first == null }.second shouldBe you
+        inside shouldBe listOf(true, true)
+    }
+
+    /**
+     * The camera frames again when the fix arrives after the first framing, and when the same pin moves (same ids, new coordinates).
+     * Red on prior: the camera was framed by pin ids only.
+     */
+    @Test fun aLateFixOrAMovedPinFramesTheMapAgain() {
+        var dot by androidx.compose.runtime.mutableStateOf<Pair<Double, Double>?>(null)
+        var items by androidx.compose.runtime.mutableStateOf(near())
+        rule.setContent { MisuraSurface { Box(Modifier.fillMaxSize()) { ItemScreen(items, "A1", null, 0, {}, {}, onDirections = {}, you = dot) } } }
+        val far = 48.2601 to 11.7102 // ~15 km from the pin: outside a one-pin zoom-15 view
+        awaitLook(listOf(48.1482 to 11.5761)) { (_, i) -> i.all { it } }
+        look(listOf(far))!!.second shouldBe listOf(false)
+        dot = far
+        awaitLook(listOf(48.1482 to 11.5761, far)) { (m, i) -> m.any { it.first == null } && i.all { it } }
+        dot = null
+        awaitLook(listOf(far)) { (m, i) -> m.none { it.first == null } && i == listOf(false) } // back on the pin alone, before it moves
+        val moved = 48.0301 to 11.4402
+        items = items.map { if (it.id == "A1") it.copy(lat = moved.first, lng = moved.second) else it }
+        awaitLook(listOf(moved)) { (_, i) -> i.all { it } }
+    }
+
+    /** A dot alone never makes a map: a near set without a pin shows none, with or without the fix. */
+    @Test fun aDotAloneNeverMakesAMap() {
+        rule.setContent { MisuraSurface { Box(Modifier.fillMaxSize()) { ItemScreen(near(pinned = false), null, null, 0, {}, {}, onDirections = {}, you = you) } } }
+        rule.onNodeWithTag(MAP_TAG).assertDoesNotExist()
+    }
 }

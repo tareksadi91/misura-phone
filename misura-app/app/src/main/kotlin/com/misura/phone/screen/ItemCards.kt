@@ -53,12 +53,13 @@ import java.io.File
  * Items screen: [line] (Misura's words) as plain text above the cards, which sit at the bottom like the place cards.
  * A near-me app find ([ItemFact.near], owner list item 7) is the decision screen instead: a map on top when some venue has a certain pin
  * (never an empty map), text-only cards with Open and, with a pin, Directions; Misura's line goes on the pick's card. [stale] = the
- * session is older than PLACES_MAX_AGE_MS: no pins (Places terms, like place cards). [onDirections] opens a Maps link.
+ * session is older than PLACES_MAX_AGE_MS: no pins (Places terms, like place cards). [onDirections] opens a Maps link. [you] = where the run
+ * that found them was ([com.misura.phone.hands.NearYou]): a blue dot on that map, framed with the pins; never a map by itself.
  */
 @Composable
 fun ItemScreen(items: List<ItemFact>, pick: String?, line: String?, index: Int, onIndex: (Int) -> Unit, onOpen: (ItemFact) -> Unit, modifier: Modifier = Modifier,
-    stale: Boolean = false, onDirections: ((String) -> Unit)? = null) {
-    if (items.any { it.near }) return NearItems(items, pick, line, index, onIndex, onOpen, modifier, stale, onDirections)
+    stale: Boolean = false, onDirections: ((String) -> Unit)? = null, you: Pair<Double, Double>? = null) {
+    if (items.any { it.near }) return NearItems(items, pick, line, index, onIndex, onOpen, modifier, stale, onDirections, you)
     Column(modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(M.p)) {
         Spacer(Modifier.weight(1f))
         if (line != null) AnswerText(line, Modifier.padding(horizontal = M.gutter - M.m))
@@ -72,7 +73,7 @@ const val ITEM_PHOTO_TAG = "item-photo"
 
 @Composable
 private fun NearItems(items: List<ItemFact>, pick: String?, line: String?, index: Int, onIndex: (Int) -> Unit, onOpen: (ItemFact) -> Unit, modifier: Modifier,
-    stale: Boolean, onDirections: ((String) -> Unit)?) {
+    stale: Boolean, onDirections: ((String) -> Unit)?, you: Pair<Double, Double>?) {
     val ctx = LocalContext.current
     val open = onDirections ?: { url: String -> runCatching { com.misura.phone.MisuraGraph.openDirections(ctx.applicationContext, url) }; Unit }
     // Past the places age limit a card keeps its words only: no map, no Directions, no reason about the map.
@@ -83,7 +84,7 @@ private fun NearItems(items: List<ItemFact>, pick: String?, line: String?, index
         if (pinned.isNotEmpty())
             PlaceMap(pinned.map { PlaceFact(it.id, it.title, lat = it.lat, lng = it.lng) }, shown.getOrNull(index)?.id, onTap = {},
                 onSelect = { id -> shown.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let(onIndex) },
-                modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(LocalRadii.current.card)))
+                modifier = Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(LocalRadii.current.card)), you = you)
         else Spacer(Modifier.weight(1f))
         if (line != null && !onPick) AnswerText(line, Modifier.padding(horizontal = M.gutter - M.m))
         CardPager(shown.size, index, onIndex, "item") { i ->

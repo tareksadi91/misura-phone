@@ -56,8 +56,9 @@ object MisuraGraph {
     /** Open an app: a screen parked on it comes to the main screen instead of the app being launched again (see UseApp.bringParked). */
     @Volatile var bringParked: suspend (String) -> Boolean = { false }
 
-    /** Starts an app's launch screen for [openTarget]; a seam so a test can make the launch fail. */
+    /** Starts an app's launch screen for [openTarget]; a seam so a test can make the launch fail (debug builds only; the setter is a no-op in release). */
     @Volatile internal var appOpener: (Context, String) -> Boolean = { c, p -> com.misura.phone.hands.openApp(c, p) }
+        set(v) { if (BuildConfig.DEBUG) field = v } // release dispatch stays bound to the real opener
 
     /**
      * Opens a shortcut's direct target for the user (Home tap, app sheet): the parked-screen handoff first, then the destination. Never touches the

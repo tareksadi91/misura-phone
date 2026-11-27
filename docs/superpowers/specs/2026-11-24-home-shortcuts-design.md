@@ -60,7 +60,7 @@ Show it, widgets, built apps; renaming or reordering shortcuts (remove + keep ag
 
 Plan: `docs/superpowers/plans/2026-11-27-home-shortcuts-v2.md`. **v2 wins over everything above where they differ** (tap behaviour, replacement, making a shortcut).
 
-- A shortcut is an optional **direct target** plus optional saved words (at least one). Targets: the app itself, a shortcut the app publishes (`LauncherApps`), a fixed Settings page, or one of two reviewed link templates (Maps route to Home/Work, a Spotify page from a link the user pasted). Targets are resolved by code, never model-written strings.
+- A shortcut is an optional **direct target** plus optional saved words (at least one). Targets: the app itself, a shortcut the app publishes (`LauncherApps`), a fixed Settings page, or one of two reviewed link templates (Maps route to Home/Work, a Spotify page from a link in the owner's own typed or spoken words; never a saved shortcut's, routine's or debug prompt). Targets are resolved by code, never model-written strings.
 - **A tap on a line with a target opens it directly**, no agent and no task. If it can't open, saved words run as before; without words the line says "Couldn't open. Try again."
 - Words-only shortcuts behave as in phase 1 (tap = typed request, needs a run that worked).
 - **No least-recently-used replacement.** Full Home: the app list asks which one to replace; the tool refuses ("Home is full: remove one first").

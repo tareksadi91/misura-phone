@@ -29,6 +29,7 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
@@ -49,7 +50,10 @@ import com.misura.core.agent.Turn
 import com.misura.core.exec.Controller
 import com.misura.core.exec.Hand
 import com.misura.core.exec.HandResult
+import com.misura.core.shortcut.LinkTemplate
 import com.misura.core.shortcut.Shortcut
+import com.misura.core.shortcut.Target
+import com.misura.phone.shortcut.ShortcutLauncher
 import com.misura.core.task.Payload
 import com.misura.core.task.TaskState
 import com.misura.phone.ASK_FIELD
@@ -234,6 +238,133 @@ class HomeShortcutsTest {
         rule.waitUntil(8_000) { count(hasText("Checked in.", substring = true)) > 0 }
         rule.onAllNodes(line("Club check-in")).assertCountEquals(0)
         rule.waitUntil(5_000) { store.all().single().lastUsedAt != null }
+    }
+
+    // ---- v2: a tap opens the direct target; long-press removes ----
+    private val fx = "com.misura.testapp"
+    private val inst = InstrumentationRegistry.getInstrumentation()
+    private fun shell(cmd: String): String = inst.getUiAutomation(android.app.UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES).executeShellCommand(cmd)
+        .use { android.os.ParcelFileDescriptor.AutoCloseInputStream(it).bufferedReader().readText() }
+    private fun control(op: String) = shell("am broadcast --include-stopped-packages -a com.misura.testapp.SHORTCUTS -p $fx --es op $op")
+    private fun opened() = shell("run-as $fx cat files/opened.txt").trim()
+    private fun fixture() {
+        shell("am force-stop $fx"); shell("run-as $fx rm -f files/opened.txt"); control("remove"); control("publish")
+        val l = ShortcutLauncher(ctx)
+        rule.waitUntil(8_000) { l.published(fx).map { it.id }.containsAll(listOf("fx_a", "fx_b")) }
+    }
+    private fun keepTarget(title: String, target: Target, p: String? = null) =
+        check(store.keep(Shortcut("id-$title", title, p, null, target, createdAt = System.currentTimeMillis()), null) == com.misura.phone.shortcut.KeepResult.Kept) { "store full" }
+    /** The production opener (real launcher), recording what it was asked and what it answered. */
+    private class Opens(private val real: suspend (Target) -> Boolean) {
+        val asked = java.util.concurrent.CopyOnWriteArrayList<Target>(); val answers = java.util.concurrent.CopyOnWriteArrayList<Boolean>()
+        val open: suspend (Target) -> Boolean = { t -> asked += t; real(t).also { answers += it } }
+    }
+    private fun real() = Opens { t -> ShortcutLauncher(ctx).open(t) { false } }
+    private fun fake(result: Boolean = true) = Opens { result }
+    private fun showWith(o: Opens, a: Agent = agent()) = rule.setContent { HomeScreen(a, sessions, null, null, shortcutStore = store, openTarget = o.open) }
+    private val failure = hasText("Couldn't open. Try again.")
+    private fun tearFixture() { control("remove"); shell("am force-stop $fx"); shell("input keyevent KEYCODE_HOME") }
+
+    @Test fun tapWithTargetOpensWithoutAgent() {
+        try {
+            fixture()
+            val brain = Script(); val o = real()
+            keepTarget("Fixture A", Target.AppShortcut(fx, "fx_a")); showWith(o, agent(brain)); waitFor(line("Fixture A"))
+            rule.onNode(line("Fixture A")).performClick()
+            rule.waitUntil(10_000) { opened() == "opened=fx_a" }
+            o.answers.toList() shouldBe listOf(true)
+            brain.tools shouldBe emptyList() // no agent turn
+            runBlocking { sessions.recent(5) } shouldBe emptyList()
+            rule.waitUntil(5_000) { store.all().single().lastUsedAt != null }
+        } finally { tearFixture() }
+    }
+
+    /** Two real taps; the launcher returns at once and Home is still resumed: the second lands inside the double-tap window. */
+    @Test fun directDoubleTapOpensOnce() {
+        val o = fake(); keepTarget("Wifi", Target.Settings(com.misura.core.shortcut.SettingsPage.WIFI)); showWith(o); waitFor(line("Wifi"))
+        rule.onNode(line("Wifi")).performClick(); rule.onNode(line("Wifi")).performClick()
+        Thread.sleep(600); rule.waitForIdle()
+        o.asked.size shouldBe 1
+    }
+
+    @Test fun retryAfterWindowWorks() {
+        val o = fake(); keepTarget("Wifi", Target.Settings(com.misura.core.shortcut.SettingsPage.WIFI)); showWith(o); waitFor(line("Wifi"))
+        rule.onNode(line("Wifi")).performClick(); rule.waitUntil(5_000) { o.asked.size == 1 }
+        Thread.sleep(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 250); rule.waitForIdle()
+        rule.onNode(line("Wifi")).performClick(); rule.waitUntil(5_000) { o.asked.size == 2 }
+    }
+
+    @Test fun tapWithBrokenTargetFallsBackToPrompt() {
+        val o = real(); keepTarget("Club", Target.App("com.example.nothere"), prompt)
+        showWith(o, agent(Script(text("Checked in.")))); waitFor(line("Club"))
+        rule.onNode(line("Club")).performClick()
+        rule.waitUntil(8_000) { runBlocking { sessions.recent(5).isNotEmpty() } }
+        o.answers.toList() shouldBe listOf(false)
+        val id = runBlocking { sessions.recent(5).single().id }
+        rule.waitUntil(5_000) { runBlocking { sessions.turns(id) }.any { it.role == "user" } }
+        ((runBlocking { sessions.turns(id) }.first { it.role == "user" }.content["parts"] as JsonArray)[0] as JsonObject)["text"].let { (it as JsonPrimitive).content } shouldBe prompt
+        rule.onAllNodes(failure).assertCountEquals(0)
+    }
+
+    @Test fun tapWithBrokenTargetNoPromptShowsInline() {
+        val o = real(); keepTarget("Gone", Target.AppShortcut(fx, "fx_missing")); showWith(o); waitFor(line("Gone"))
+        rule.onNode(line("Gone")).performClick()
+        waitFor(failure)
+        rule.onNode(failure).fetchSemanticsNode().config.contains(SemanticsProperties.LiveRegion) shouldBe true
+        rule.onAllNodes(line("Gone")).assertCountEquals(1) // the line stays
+        runBlocking { sessions.recent(5) } shouldBe emptyList()
+        store.all().single().lastUsedAt shouldBe null
+    }
+
+    /** Spotify is not on the emulator: its link target cannot open; nothing crashes and the line says so. */
+    @Test fun linkWithMissingHandlerFailsSafely() {
+        check(ctx.packageManager.getLaunchIntentForPackage("com.spotify.music") == null) { "Spotify must be absent on the test device" }
+        val o = real(); keepTarget("Focus", Target.Link(LinkTemplate.SPOTIFY_PAGE, "playlist:" + "a".repeat(22))); showWith(o); waitFor(line("Focus"))
+        rule.onNode(line("Focus")).performClick()
+        waitFor(failure); o.answers.toList() shouldBe listOf(false)
+        rule.onAllNodes(line("Focus")).assertCountEquals(1)
+    }
+
+    /** Maps is on this emulator: a kept route link survives a restart of Home and opens on the tap. (Without Maps only the safe failure is asserted.) */
+    @Test fun linkTargetSurvivesRestartAndOpens() {
+        val maps = Target.Link(LinkTemplate.MAPS_ROUTE, "Home")
+        val handler = ShortcutLauncher(ctx).resolve(maps)
+        val o = real(); keepTarget("Route", maps)
+        val restoration = StateRestorationTester(rule); val a = agent()
+        restoration.setContent { HomeScreen(a, sessions, null, null, shortcutStore = store, openTarget = o.open) }
+        waitFor(line("Route"))
+        restoration.emulateSavedInstanceStateRestore(); waitFor(line("Route"))
+        store.all().single().target shouldBe maps
+        rule.onNode(line("Route")).performClick()
+        if (handler) { rule.waitUntil(8_000) { o.answers.isNotEmpty() }; o.answers.toList() shouldBe listOf(true); shell("input keyevent KEYCODE_HOME") }
+        else { waitFor(failure); o.answers.toList() shouldBe listOf(false) }
+    }
+
+    @Test fun targetSurvivesRestart() {
+        val o = fake(); keepTarget("Wifi", Target.Settings(com.misura.core.shortcut.SettingsPage.WIFI))
+        val restoration = StateRestorationTester(rule); val a = agent()
+        restoration.setContent { HomeScreen(a, sessions, null, null, shortcutStore = store, openTarget = o.open) }
+        waitFor(line("Wifi")); restoration.emulateSavedInstanceStateRestore(); waitFor(line("Wifi"))
+        rule.onNode(line("Wifi")).performClick(); rule.waitUntil(5_000) { o.asked.size == 1 }
+        o.asked.single() shouldBe Target.Settings(com.misura.core.shortcut.SettingsPage.WIFI)
+    }
+
+    @Test fun longPressRemoves() {
+        keep("Club check-in", prompt); ready("r"); show(); waitFor(line("Club check-in"))
+        rule.onNode(line("Club check-in")).performTouchInput { longClick() }
+        waitFor(hasText("Remove from Home"))
+        // One item, and a plain tap on the line did not run anything.
+        rule.onAllNodes(hasText("Remove from Home")).assertCountEquals(1)
+        runBlocking { sessions.recent(5).size } shouldBe 1 // only the seeded task
+        rule.onNode(hasText("Remove from Home")).performClick()
+        rule.waitUntil(8_000) { store.all().isEmpty() }
+        rule.onAllNodes(line("Club check-in")).assertCountEquals(0)
+        runBlocking { sessions.recent(5).size } shouldBe 1
+    }
+
+    @Test fun taskLinesHaveNoLongPress() {
+        ready("r"); show(); waitFor(hasContentDescription(", ready for your go", substring = true))
+        rule.onNode(hasContentDescription(", ready for your go", substring = true)).fetchSemanticsNode().config.contains(SemanticsActions.OnLongClick) shouldBe false
     }
 
     /** The real shortcut tool, wired as MisuraGraph wires it: the link check reads the owner's utterances from this session's stored turns. */

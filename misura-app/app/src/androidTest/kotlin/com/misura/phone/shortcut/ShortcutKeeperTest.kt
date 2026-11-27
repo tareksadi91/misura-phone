@@ -4,6 +4,8 @@ import com.misura.core.agent.TurnOrigin
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.test.platform.app.InstrumentationRegistry
@@ -308,6 +310,15 @@ class ShortcutKeeperTest {
         rule.waitUntil(8_000) { store.all().isEmpty() }
         rule.waitUntil(8_000) { pins.of(pkg).isEmpty() }
         pins.of(pkg) shouldBe emptySet()
-        // Home long-press (Task 5) and the app-list menu (Task 6) route through keeper.remove as well; each adds its own assertion with its UI.
+        // Home long-press ("Remove from Home") through the same keeper: the pin goes too. (The app-list menu, Task 6, adds its own assertion.)
+        keep(ap("hold")); pins.of(pkg) shouldBe setOf("sid-hold")
+        val hold = hasText("Title hold") and hasContentDescription(", shortcut", substring = true)
+        rule.waitUntil(8_000) { rule.onAllNodes(hold).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hold).performTouchInput { longClick() }
+        rule.waitUntil(8_000) { rule.onAllNodes(hasText("Remove from Home")).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasText("Remove from Home")).performClick()
+        rule.waitUntil(8_000) { store.all().isEmpty() }
+        rule.waitUntil(8_000) { pins.of(pkg).isEmpty() }
+        pins.of(pkg) shouldBe emptySet()
     }
 }

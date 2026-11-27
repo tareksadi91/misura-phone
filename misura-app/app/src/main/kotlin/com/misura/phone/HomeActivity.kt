@@ -44,6 +44,7 @@ class HomeActivity : ComponentActivity() {
         setContent {
             HomeScreen(g.agent, g.sessions, g.photoLoader, request, Sends(g.tasks, g.controller, g.scope), homeTap,
                 com.misura.phone.voice.AndroidVoice(this), appsProvider = { g.apps }, shortcutStore = g.shortcuts, shortcutKeeper = g.shortcutKeeper,
+                openTarget = { t -> runCatching { g.openTarget(this@HomeActivity, t) }.getOrDefault(false) },
                 onOpenSettings = { startActivity(Intent(this, com.misura.phone.setup.SetupActivity::class.java)) }) { pkg ->
                 g.scope.launch { g.openTarget(this@HomeActivity, com.misura.core.shortcut.Target.App(pkg)) }
             }

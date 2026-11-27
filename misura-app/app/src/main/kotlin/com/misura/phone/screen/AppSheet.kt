@@ -278,6 +278,22 @@ fun launchSheetEntry(context: Context, state: AppSheetState, entry: SheetEntry, 
 private fun AppMenu(entry: SheetEntry, shortcuts: List<ShortcutInfo>, pinned: Boolean, onDismiss: () -> Unit,
     onShortcut: (ShortcutInfo) -> Unit, onPin: () -> Unit) {
     val context = LocalContext.current
+    MenuPopup(onDismiss) {
+            shortcuts.forEach { shortcut -> MenuItem(shortcut.shortLabel?.toString() ?: shortcut.id) { onShortcut(shortcut) } }
+            if (shortcuts.isNotEmpty()) Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(M.outline.copy(alpha = .2f)))
+            MenuItem(if (pinned) "Unpin" else "Pin", secondary = true, onClick = onPin)
+            MenuItem("App info", secondary = true) {
+                runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", entry.pkg, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    .onFailure { Toast.makeText(context, "Couldn't open app info", Toast.LENGTH_SHORT).show() }
+                onDismiss()
+            }
+    }
+}
+
+/** The menu's popup: above its anchor, one rounded surface (the app menu's look); Home's line menu reuses it. */
+@Composable
+internal fun MenuPopup(onDismiss: () -> Unit, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
     val margin = with(LocalDensity.current) { 16.dp.roundToPx() }
     val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
     val position = remember(margin, gap) { object : PopupPositionProvider {
@@ -289,22 +305,12 @@ private fun AppMenu(entry: SheetEntry, shortcuts: List<ShortcutInfo>, pinned: Bo
     Popup(popupPositionProvider = position, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
         Column(Modifier.width((LocalConfiguration.current.screenWidthDp.dp - 88.dp).coerceAtLeast(160.dp))
             .heightIn(max = 360.dp).shadow(18.dp, RoundedCornerShape(14.dp)).background(M.surface, RoundedCornerShape(14.dp))
-            .verticalScroll(scroll).padding(vertical = 6.dp)) {
-            shortcuts.forEach { shortcut -> MenuItem(shortcut.shortLabel?.toString() ?: shortcut.id) { onShortcut(shortcut) } }
-            if (shortcuts.isNotEmpty()) Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(M.outline.copy(alpha = .2f)))
-            MenuItem(if (pinned) "Unpin" else "Pin", secondary = true, onClick = onPin)
-            MenuItem("App info", secondary = true) {
-                runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                    Uri.fromParts("package", entry.pkg, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                    .onFailure { Toast.makeText(context, "Couldn't open app info", Toast.LENGTH_SHORT).show() }
-                onDismiss()
-            }
-        }
+            .verticalScroll(scroll).padding(vertical = 6.dp), content = content)
     }
 }
 
 @Composable
-private fun MenuItem(label: String, secondary: Boolean = false, onClick: () -> Unit) {
+internal fun MenuItem(label: String, secondary: Boolean = false, onClick: () -> Unit) {
     Text(label, style = ST.step.copy(fontSize = 16.sp), color = if (secondary) M.text2 else M.text,
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp))

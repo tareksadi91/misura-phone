@@ -2,6 +2,9 @@ package com.misura.phone
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.draw.alpha
@@ -178,7 +181,9 @@ private val NavSaver = Saver<Nav, String>(
 @Composable
 fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openRequest: OpenRequest?, sends: Sends? = null, homeTap: Long = 0, voice: com.misura.phone.voice.Voice? = null,
     apps: List<Pair<String, String>> = emptyList(), onOpenItem: ((ItemFact) -> Unit)? = null, appsProvider: () -> List<Pair<String, String>> = { apps }, onOpenSettings: (() -> Unit)? = null,
-    shortcutStore: com.misura.phone.shortcut.ShortcutStore? = null, shortcutKeeper: com.misura.phone.shortcut.ShortcutKeeper? = null, openApp: (String) -> Unit = {}) {
+    shortcutStore: com.misura.phone.shortcut.ShortcutStore? = null, shortcutKeeper: com.misura.phone.shortcut.ShortcutKeeper? = null,
+    /** Opens a shortcut's direct target (MisuraGraph.openTarget); false = it did not open. Never throws. */
+    openTarget: suspend (com.misura.core.shortcut.Target) -> Boolean = { false }, openApp: (String) -> Unit = {}) {
     // Every shortcut mutation goes through the keeper; a Home built with only a store (tests, previews) gets one with no pin work.
     val keeper = shortcutKeeper ?: remember(shortcutStore) { shortcutStore?.let { com.misura.phone.shortcut.ShortcutKeeper(it, pins = null) } }
     var openId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -189,6 +194,11 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
     var shortcuts by remember { mutableStateOf<List<com.misura.core.shortcut.Shortcut>>(emptyList()) }
     // A tapped shortcut is starting its task: a second tap before the task screen opens starts nothing.
     var startingShortcut by remember { mutableStateOf(false) }
+    // A direct open returns while Home may still be resumed: a second tap inside the double-tap window after a successful open opens nothing.
+    var directUntil by remember { mutableLongStateOf(0L) }
+    // The shortcut line that shows an inline failure (id to its text), and the one whose long-press menu is open.
+    var lineNote by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var menuFor by remember { mutableStateOf<String?>(null) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var text by rememberSaveable { mutableStateOf("") }
     var focused by remember { mutableStateOf(false) }
@@ -323,13 +333,20 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
     // A new task: typed or spoken words (OWNER), or a kept shortcut's saved request (SHORTCUT: same path, full tools, but not the owner's words now).
     suspend fun startTask(t: String, origin: com.misura.core.agent.TurnOrigin) { val new = agent.start(t, origin); openId = new; nav = Nav(); targetId = null; targetSession = null; cleared = false }
     fun startShortcut(sc: com.misura.core.shortcut.Shortcut) {
-        if (startingShortcut || sheet.moving || sheet.engaged || sheet.searching || openId != null) return
-        startingShortcut = true
+        if (startingShortcut || android.os.SystemClock.uptimeMillis() < directUntil || sheet.moving || sheet.engaged || sheet.searching || openId != null) return
+        startingShortcut = true; lineNote = null
         scope.launch {
             try {
-                startTask(sc.prompt ?: return@launch, com.misura.core.agent.TurnOrigin.SHORTCUT) // target-only shortcuts open directly (v2 Task 5); none are created yet
+                val target = sc.target
+                if (target != null) {
+                    val opened = try { openTarget(target) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { false }
+                    if (opened) directUntil = android.os.SystemClock.uptimeMillis() + android.view.ViewConfiguration.getDoubleTapTimeout()
+                    // A target that will not open falls back to the saved words when there are some; otherwise the line says so and stays.
+                    else if (sc.prompt == null) { lineNote = sc.id to "Couldn't open. Try again."; return@launch }
+                    if (!opened) startTask(sc.prompt!!, com.misura.core.agent.TurnOrigin.SHORTCUT)
+                } else startTask(sc.prompt!!, com.misura.core.agent.TurnOrigin.SHORTCUT)
                 try { withContext(Dispatchers.IO) { shortcutStore?.used(sc.id, System.currentTimeMillis()) } }
-                catch (_: com.misura.phone.store.StorageUnavailableException) {} // the task runs; only its last-used time is lost
+                catch (_: com.misura.phone.store.StorageUnavailableException) {} // it ran; only its last-used time is lost
             } finally { startingShortcut = false }
         }
     }
@@ -392,7 +409,7 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
                         // A failed write throws: the line springs back (SwipeTaskLine) and the shortcut stays kept.
                         withContext(Dispatchers.IO) { keeper?.remove(sc.id) }
                         shortcuts = shortcuts.filter { it.id != sc.id }
-                    }, onEarlier = { if (!sheet.searching) earlier = true }, onDismiss = { ids ->
+                    }, note = lineNote, menuFor = menuFor, onMenu = { menuFor = it }, onNote = { lineNote = it }, onEarlier = { if (!sheet.searching) earlier = true }, onDismiss = { ids ->
                         if (!sheet.searching) { ids.map { agent.dismiss(it) }.forEach { it.await() }; rows = rows.map { if (it.id in ids) it.copy(fresh = false) else it } }
                     }, hint = { com.misura.phone.screen.FirstUseHints(sheet, !focused && !listening && !homeHasLines) }) {
                         if (!sheet.searching) { openId = it; nav = Nav() }
@@ -786,9 +803,11 @@ const val EARLIER = "Earlier ›"
  */
 @Composable
 private fun Home(rows: List<Row>, now: Long, modifier: Modifier, shortcuts: List<com.misura.core.shortcut.Shortcut> = emptyList(),
-    onShortcut: (com.misura.core.shortcut.Shortcut) -> Unit = {}, onRemoveShortcut: suspend (com.misura.core.shortcut.Shortcut) -> Unit = {}, onEarlier: (() -> Unit)? = null, onDismiss: suspend (List<String>) -> Unit = {},
+    onShortcut: (com.misura.core.shortcut.Shortcut) -> Unit = {}, onRemoveShortcut: suspend (com.misura.core.shortcut.Shortcut) -> Unit = {},
+    note: Pair<String, String>? = null, menuFor: String? = null, onMenu: (String?) -> Unit = {}, onNote: (Pair<String, String>?) -> Unit = {}, onEarlier: (() -> Unit)? = null, onDismiss: suspend (List<String>) -> Unit = {},
     hint: @Composable () -> Unit = {}, onOpen: (String) -> Unit) = androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxWidth()) {
     val density = LocalDensity.current
+    val removeScope = androidx.compose.runtime.rememberCoroutineScope()
     val measure = androidx.compose.ui.text.rememberTextMeasurer(cacheSize = 16)
     val baseStyle = androidx.compose.material3.LocalTextStyle.current
     val contentWidth = with(density) { (maxWidth - (M.gutter - M.m) * 2).roundToPx().coerceAtLeast(1) }
@@ -842,8 +861,22 @@ private fun Home(rows: List<Row>, now: Long, modifier: Modifier, shortcuts: List
             if (showRunning && running.size == 1) key(running[0].id) { TaskLine(runningName, "$runningName, working", { com.misura.phone.screen.WorkingDot() }, onRemove = { onDismiss(listOf(running[0].id)) }) { onOpen(running[0].id) } }
             else if (showRunning) key(running.map { it.id }) { TaskLine(runningName, sign = { com.misura.phone.screen.WorkingDot() },
                 onRemove = { onDismiss(running.map { it.id }) }, onClick = onEarlier) }
-            shownShortcuts.forEach { sc -> key("shortcut:" + sc.id) { TaskLine(sc.title, "${sc.title}, shortcut", { ShortcutSign(sc.app) }, action = "Remove",
-                onRemove = { onRemoveShortcut(sc) }) { onShortcut(sc) } } }
+            shownShortcuts.forEach { sc -> key("shortcut:" + sc.id) { Column {
+                Box {
+                    TaskLine(sc.title, "${sc.title}, shortcut", { ShortcutSign(sc.app) }, action = "Remove", onRemove = { onRemoveShortcut(sc) },
+                        onLongClick = { onMenu(sc.id) }) { onShortcut(sc) }
+                    if (menuFor == sc.id) com.misura.phone.screen.MenuPopup(onDismiss = { onMenu(null) }) {
+                        com.misura.phone.screen.MenuItem("Remove from Home") {
+                            onMenu(null)
+                            removeScope.launch {
+                                try { onRemoveShortcut(sc) } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                                catch (_: Exception) { onNote(sc.id to "Couldn't remove. Try again.") }
+                            }
+                        }
+                    }
+                }
+                note?.takeIf { it.first == sc.id }?.let { Text(it.second, style = ST.step, color = M.text2, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+            } } }
             if (rows.isNotEmpty()) Text(if (hidden > 0) "Earlier · $hidden still open ›" else EARLIER, style = ST.nav, color = if (hidden > 0) M.text else M.text2,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = "Earlier tasks", onClick = onEarlier).padding(vertical = 16.dp))
         }
@@ -865,9 +898,11 @@ private fun ShortcutSign(app: String?) = Box(Modifier.requiredSize(16.u), conten
 /** One tappable line of screen text, with its sign in front when it has one. Opens, never commits. */
 @Composable
 private fun TaskLine(text: String, says: String = text, sign: (@Composable () -> Unit)? = null, maxLines: Int = 1,
-    action: String = "Dismiss", onRemove: (suspend () -> Unit)? = null, onClick: () -> Unit) {
+    action: String = "Dismiss", onRemove: (suspend () -> Unit)? = null, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     val line: @Composable (Modifier) -> Unit = { actions ->
-        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = "Open", onClick = onClick)
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).then(
+                if (onLongClick == null) Modifier.clickable(role = Role.Button, onClickLabel = "Open", onClick = onClick)
+                else Modifier.combinedClickable(role = Role.Button, onClickLabel = "Open", onLongClickLabel = "Remove from Home", onLongClick = onLongClick, onClick = onClick))
             .semantics(mergeDescendants = true) { contentDescription = says }.then(actions).padding(vertical = 12.dp),
             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.u)) {
             if (sign != null) Box(Modifier.width(14.u), contentAlignment = androidx.compose.ui.Alignment.Center) { sign() }

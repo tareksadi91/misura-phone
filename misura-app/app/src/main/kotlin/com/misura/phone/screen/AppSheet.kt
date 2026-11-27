@@ -90,17 +90,20 @@ import com.misura.phone.cards.ST
 
 /** Keep query and stored-row reads out of HomeScreen's composition scope. */
 @Composable
-fun AppSheet(state: AppSheetState, apps: List<Pair<String, String>>, openApp: (String) -> Unit, modifier: Modifier = Modifier, onSettings: (() -> Unit)? = null) {
+fun AppSheet(state: AppSheetState, apps: List<Pair<String, String>>, openApp: (String) -> Unit, modifier: Modifier = Modifier, onSettings: (() -> Unit)? = null,
+    home: SheetHome? = null) {
     val rows = remember(apps, state.pins, state.counts, state.typed) { sheetRows(apps, state.pins, state.counts, state.typed) }
-    AppSheet(state, rows, openApp, modifier, onSettings)
+    AppSheet(state, rows, openApp, modifier, onSettings, home)
 }
 
 /** Reverse list: first pin is closest to the shared field, most-used app closest to Pinned. */
 @Composable
-fun AppSheet(state: AppSheetState, rows: SheetRows, openApp: (String) -> Unit, modifier: Modifier = Modifier, onSettings: (() -> Unit)? = null) {
+fun AppSheet(state: AppSheetState, rows: SheetRows, openApp: (String) -> Unit, modifier: Modifier = Modifier, onSettings: (() -> Unit)? = null,
+    home: SheetHome? = null) {
     val context = LocalContext.current
     var held by remember { mutableStateOf<String?>(null) }
-    var shortcuts by remember { mutableStateOf<List<ShortcutInfo>>(emptyList()) }
+    var shortcuts by remember { mutableStateOf<List<MenuShortcut>>(emptyList()) }
+    var keptAtOpen by remember { mutableStateOf<List<com.misura.core.shortcut.Shortcut>>(emptyList()) }
     val entries = rows.entries
     val highlightedKey = entries.firstOrNull()?.key.takeIf { state.typed.isNotBlank() }
     val config = LocalViewConfiguration.current
@@ -157,14 +160,15 @@ fun AppSheet(state: AppSheetState, rows: SheetRows, openApp: (String) -> Unit, m
                                     held = state.menuOpen && held == entry.key,
                                     onOpen = { launchSheetEntry(context, state, entry, openApp) },
                                     onHold = {
-                                        held = entry.key; shortcuts = appShortcuts(context, entry.pkg); state.menuOpen = true
+                                        held = entry.key; shortcuts = appShortcuts(context, entry.pkg, home)
+                                        keptAtOpen = home?.let { runCatching { it.store.all() }.getOrDefault(emptyList()) }.orEmpty(); state.menuOpen = true
                                     })
                                 if (state.menuOpen && held == entry.key) {
                                     val pinned = state.pins.any { it.key == entry.key }
-                                    AppMenu(entry, shortcuts, pinned, onDismiss = { state.menuOpen = false },
+                                    AppMenu(entry, shortcuts, pinned, home, keptAtOpen, onDismiss = { state.menuOpen = false },
                                         onShortcut = { shortcut ->
                                             launchSheetEntry(context, state, entry.copy(shortcutId = shortcut.id,
-                                                shortcutLabel = shortcut.shortLabel?.toString()), openApp)
+                                                shortcutLabel = shortcut.label), openApp)
                                         }, onPin = { state.togglePin(entry); state.menuOpen = false })
                                 }
                             }
@@ -250,13 +254,16 @@ private fun AppSheetRow(entry: SheetEntry, highlighted: Boolean, held: Boolean, 
     }
 }
 
-private fun appShortcuts(context: Context, pkg: String): List<ShortcutInfo> = runCatching {
-    val launcher = context.getSystemService(LauncherApps::class.java) ?: return@runCatching emptyList()
-    if (!launcher.hasShortcutHostPermission()) return@runCatching emptyList()
-    val query = LauncherApps.ShortcutQuery().setPackage(pkg).setQueryFlags(
-        LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED)
-    launcher.getShortcuts(query, Process.myUserHandle()).orEmpty().filter { it.isEnabled }.distinctBy { it.id }.sortedBy { it.rank }
-}.getOrDefault(emptyList())
+/** The app's own shortcuts for its menu. With Home injected they come from the launcher's published list (sanitized labels, enabled only), the same list "+ Home" validates against. */
+private fun appShortcuts(context: Context, pkg: String, home: SheetHome?): List<MenuShortcut> =
+    if (home != null) home.publishedFor(pkg) else runCatching {
+        val launcher = context.getSystemService(LauncherApps::class.java) ?: return@runCatching emptyList()
+        if (!launcher.hasShortcutHostPermission()) return@runCatching emptyList()
+        val query = LauncherApps.ShortcutQuery().setPackage(pkg).setQueryFlags(
+            LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED)
+        launcher.getShortcuts(query, Process.myUserHandle()).orEmpty().filter { it.isEnabled }.distinctBy { it.id }.sortedBy { it.rank }
+            .map { MenuShortcut(it.id, it.shortLabel?.toString() ?: it.id) }
+    }.getOrDefault(emptyList())
 
 fun launchSheetEntry(context: Context, state: AppSheetState, entry: SheetEntry, openApp: (String) -> Unit) {
     if (state.closing) return
@@ -275,12 +282,29 @@ fun launchSheetEntry(context: Context, state: AppSheetState, entry: SheetEntry, 
 }
 
 @Composable
-private fun AppMenu(entry: SheetEntry, shortcuts: List<ShortcutInfo>, pinned: Boolean, onDismiss: () -> Unit,
-    onShortcut: (ShortcutInfo) -> Unit, onPin: () -> Unit) {
+private fun AppMenu(entry: SheetEntry, shortcuts: List<MenuShortcut>, pinned: Boolean, home: SheetHome?, keptAtOpen: List<com.misura.core.shortcut.Shortcut>,
+    onDismiss: () -> Unit, onShortcut: (MenuShortcut) -> Unit, onPin: () -> Unit) {
     val context = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val menu = remember(home, entry.key) { home?.let { HomeMenuState(it, scope, entry.pkg, entry.name, shortcuts, keptAtOpen) } }
     MenuPopup(onDismiss) {
-            shortcuts.forEach { shortcut -> MenuItem(shortcut.shortLabel?.toString() ?: shortcut.id) { onShortcut(shortcut) } }
-            if (shortcuts.isNotEmpty()) Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(M.outline.copy(alpha = .2f)))
+        if (menu?.picking != null) HomePicker(menu)
+        else {
+            val list = menu?.shortcuts ?: shortcuts
+            list.forEach { shortcut ->
+                if (menu == null) MenuItem(shortcut.label) { onShortcut(shortcut) }
+                else {
+                    val target = com.misura.core.shortcut.Target.AppShortcut(entry.pkg, shortcut.id)
+                    val on = menu.keptFor(target) != null
+                    SplitMenuRow(shortcut.label, on, onOpen = { onShortcut(shortcut) }, onToggle = { if (on) menu.remove(target) else menu.addShortcut(shortcut) })
+                }
+            }
+            if (list.isNotEmpty()) Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(M.outline.copy(alpha = .2f)))
+            if (menu != null && !entry.made) {
+                val app = com.misura.core.shortcut.Target.App(entry.pkg)
+                val on = menu.keptFor(app) != null
+                MenuItem(if (on) "On Home · remove" else "Add to Home") { if (on) menu.remove(app) else menu.addApp() }
+            }
             MenuItem(if (pinned) "Unpin" else "Pin", secondary = true, onClick = onPin)
             MenuItem("App info", secondary = true) {
                 runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
@@ -288,6 +312,8 @@ private fun AppMenu(entry: SheetEntry, shortcuts: List<ShortcutInfo>, pinned: Bo
                     .onFailure { Toast.makeText(context, "Couldn't open app info", Toast.LENGTH_SHORT).show() }
                 onDismiss()
             }
+        }
+        menu?.let { HomeMenuStatus(it) }
     }
 }
 

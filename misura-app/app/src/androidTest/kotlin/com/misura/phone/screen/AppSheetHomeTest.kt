@@ -1,0 +1,248 @@
+package com.misura.phone.screen
+
+import androidx.activity.ComponentActivity
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
+import androidx.test.platform.app.InstrumentationRegistry
+import com.misura.core.agent.Agent
+import com.misura.core.agent.Brain
+import com.misura.core.agent.BrainReply
+import com.misura.core.agent.Tool
+import com.misura.core.agent.ToolSpec
+import com.misura.core.agent.Turn
+import com.misura.core.shortcut.Shortcut
+import com.misura.core.shortcut.Target
+import com.misura.phone.HomeScreen
+import com.misura.phone.shortcut.KeepResult
+import com.misura.phone.shortcut.ShortcutKeeper
+import com.misura.phone.shortcut.ShortcutLauncher
+import com.misura.phone.shortcut.ShortcutPins
+import com.misura.phone.shortcut.ShortcutStore
+import com.misura.phone.shortcut.ShortcutTargets
+import com.misura.phone.store.MisuraDb
+import com.misura.phone.store.RoomSessionStore
+import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import org.junit.After
+import org.junit.Before
+import org.junit.Rule
+import org.junit.Test
+
+/**
+ * The app list's long-press menu puts an app or one of its published shortcuts on Home, through the real HomeScreen, a real
+ * [ShortcutStore] and the real [ShortcutKeeper] (pins faked): the menu never writes the store itself.
+ */
+class AppSheetHomeTest {
+    @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+    private val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+    private val dbName = "app-sheet-home-test.db"
+    private lateinit var db: MisuraDb
+    private lateinit var sessions: RoomSessionStore
+    private lateinit var store: ShortcutStore
+    private lateinit var pins: FakePins
+    private lateinit var keeper: ShortcutKeeper
+    private val targets = FakeTargets()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val pkg = "com.example.club"
+
+    private class FakePins : ShortcutPins {
+        private val pinned = mutableMapOf<String, Set<String>>()
+        override fun rawPinned(pkg: String): Set<String>? = synchronized(this) { pinned[pkg].orEmpty() }
+        override fun pin(pkg: String, ids: Set<String>): Boolean { synchronized(this) { pinned[pkg] = ids }; return true }
+        fun of(pkg: String): Set<String> = synchronized(this) { pinned[pkg].orEmpty() }
+    }
+
+    private class FakeTargets : ShortcutTargets {
+        @Volatile var shortcuts = listOf(ShortcutLauncher.Published("a", "Check in", true), ShortcutLauncher.Published("b", "Book a class", true))
+        @Volatile var launchable = true
+        override fun published(pkg: String) = shortcuts
+        override fun resolve(target: Target) = launchable
+        override fun installed(pkg: String) = true
+    }
+
+    private object NoBrain : Brain {
+        override suspend fun next(system: String, turns: List<Turn>, tools: List<ToolSpec>): BrainReply = error("no brain")
+    }
+    private val noTools = emptyList<Tool>()
+
+    private fun prefs() = ctx.getSharedPreferences("shortcuts", android.content.Context.MODE_PRIVATE)
+
+    @Before fun setUp() {
+        ctx.deleteDatabase(dbName); db = MisuraDb.open(ctx, dbName); sessions = RoomSessionStore(db)
+        prefs().edit().clear().commit()
+        ctx.getSharedPreferences("first-use", 0).edit().putBoolean("apps-opened", true).commit()
+        store = ShortcutStore(ctx); pins = FakePins(); keeper = ShortcutKeeper(store, pins)
+    }
+
+    @After fun tearDown() {
+        prefs().edit().clear().commit()
+        ctx.getSharedPreferences("first-use", 0).edit().clear().commit()
+        db.close()
+    }
+
+    private fun show(home: Boolean = true) {
+        val agent = Agent(sessions, NoBrain, noTools, System::currentTimeMillis, scope)
+        rule.setContent { HomeScreen(agent, sessions, null, null, apps = listOf("Club" to pkg, "Other" to "com.example.other"),
+            shortcutStore = store, shortcutKeeper = keeper, sheetHome = if (home) SheetHome(keeper, store, targets) else null) }
+    }
+
+    private fun count(m: SemanticsMatcher) = rule.onAllNodes(m).fetchSemanticsNodes().size
+    private fun waitFor(m: SemanticsMatcher, ms: Long = 8_000) = rule.waitUntil(ms) { count(m) > 0 }
+    private fun openMenu() {
+        rule.onRoot().performTouchInput { swipeDown(startY = height * .15f, endY = height * .7f) }
+        val row = notHomeLine("Club")
+        waitFor(row)
+        rule.onNode(row).performTouchInput { longClick() }
+        waitFor(hasText("App info"))
+    }
+    /** Home itself also lists kept shortcuts by title; the sheet and its menu are everything else. */
+    private fun notHomeLine(text: String) = hasText(text) and !hasContentDescription(", shortcut", substring = true)
+    private fun click(m: SemanticsMatcher) { waitFor(m); rule.onNode(m).performClick() }
+    private val add = hasContentDescription("Add Check in to Home")
+    private val remove = hasContentDescription("Remove Check in from Home")
+    private val full get() = hasText("Home is full. Replace one:")
+    private fun kept(title: String, target: Target, id: String = "id-$title") =
+        check(store.keep(Shortcut(id, title, null, null, target, createdAt = 1), null) == KeepResult.Kept)
+    private fun fill() { kept("One", Target.AppShortcut("com.x", "1")); kept("Two", Target.AppShortcut("com.y", "2")); kept("Three", Target.AppShortcut("com.z", "3")) }
+
+    @Test fun plusHomeKeepsPublishedShortcut() {
+        show(); openMenu()
+        click(add)
+        waitFor(remove)
+        waitFor(hasContentDescription("Added to Home"))
+        val s = store.all().single()
+        s.target shouldBe Target.AppShortcut(pkg, "a")
+        s.title shouldBe "Club · Check in"
+        s.prompt shouldBe null
+        pins.of(pkg) shouldBe setOf("a")
+        count(hasText("App info")) shouldBe 1 // the menu stays open
+    }
+
+    @Test fun addAppToHome() {
+        show(); openMenu()
+        click(hasText("Add to Home"))
+        waitFor(hasText("On Home · remove"))
+        val s = store.all().single()
+        s.target shouldBe Target.App(pkg)
+        s.title shouldBe "Club"
+    }
+
+    @Test fun onHomeRemoves() {
+        kept("Club · Check in", Target.AppShortcut(pkg, "a")); kept("Club", Target.App(pkg))
+        keeper.keep(Shortcut("p", "pin", null, null, Target.AppShortcut(pkg, "b"), createdAt = 1), null) { true }
+        pins.of(pkg).contains("b") shouldBe true
+        show(); openMenu()
+        waitFor(remove)
+        click(hasText("On Home · remove"))
+        rule.waitUntil(8_000) { store.keptFor(Target.App(pkg)) == null }
+        waitFor(hasText("Add to Home"))
+        click(hasContentDescription("Remove Book a class from Home"))
+        rule.waitUntil(8_000) { store.keptFor(Target.AppShortcut(pkg, "b")) == null }
+        rule.waitUntil(8_000) { !pins.of(pkg).contains("b") } // the keeper unpins right after its store write: the menu's removal unpins like every other route
+        waitFor(hasContentDescription("Add Book a class to Home"))
+    }
+
+    @Test fun fullShowsThreeAndReplacesPicked() {
+        fill(); show(); openMenu()
+        click(add)
+        waitFor(full)
+        listOf("One", "Two", "Three", "Cancel").forEach { count(notHomeLine(it)) shouldBe 1 }
+        click(notHomeLine("Two"))
+        rule.waitUntil(8_000) { store.all().any { it.target == Target.AppShortcut(pkg, "a") } }
+        store.all().map { it.title }.toSet() shouldBe setOf("One", "Three", "Club · Check in")
+        waitFor(remove)
+        count(full) shouldBe 0
+    }
+
+    @Test fun staleReplacementRebuildsPicker() {
+        fill(); show(); openMenu()
+        click(add); waitFor(full)
+        store.remove("id-Two") // another route removed the line the picker still shows
+        kept("Four", Target.AppShortcut("com.w", "4"))
+        click(notHomeLine("Two"))
+        rule.waitUntil(8_000) { count(notHomeLine("Four")) > 0 }
+        waitFor(full)
+        count(notHomeLine("Two")) shouldBe 0
+        store.all().map { it.title }.toSet() shouldBe setOf("One", "Three", "Four")
+    }
+
+    @Test fun cancelKeepsAll() {
+        fill(); show(); openMenu()
+        click(add); waitFor(full)
+        click(hasText("Cancel"))
+        waitFor(add)
+        count(full) shouldBe 0
+        store.all().map { it.title } shouldBe listOf("One", "Two", "Three")
+    }
+
+    @Test fun splitRowHasTwoAccessibleActions() {
+        show(); openMenu()
+        waitFor(hasContentDescription("Open Check in")); waitFor(add)
+        waitFor(hasContentDescription("Open Book a class")); waitFor(hasContentDescription("Add Book a class to Home"))
+        val open = rule.onNode(hasContentDescription("Open Check in")).fetchSemanticsNode()
+        val toggle = rule.onNode(add).fetchSemanticsNode()
+        check(toggle.boundsInRoot.height >= open.boundsInRoot.height * 0.9f && toggle.boundsInRoot.width >= 40f)
+        check(open.id != toggle.id)
+        (SemanticsProperties.ContentDescription in toggle.config) shouldBe true
+    }
+
+    @Test fun storageFailureShownNotKept() {
+        show(); openMenu()
+        prefs().edit().putString("all", "{not a list").commit()
+        click(add)
+        waitFor(hasText("Not done: Misura couldn't save progress."))
+        count(hasText("App info")) shouldBe 1
+        waitFor(add)
+        prefs().getString("all", null) shouldBe "{not a list"
+    }
+
+    @Test fun targetChangedRereadsList() {
+        show(); openMenu()
+        targets.shortcuts = listOf(ShortcutLauncher.Published("a", "Check in later", true))
+        click(add)
+        waitFor(hasContentDescription("Add Check in later to Home"))
+        count(hasContentDescription("Open Book a class")) shouldBe 0
+        store.all() shouldBe emptyList()
+    }
+
+    @Test fun addedWhileTasksFillHomeStillConfirms() {
+        // Four task lines would hide the new Home line; the menu itself still says so.
+        runBlockingSeed(4)
+        show(); openMenu()
+        click(add)
+        waitFor(remove); waitFor(hasContentDescription("Added to Home"))
+        store.all().size shouldBe 1
+    }
+
+    @Test fun noHomeInjectedKeepsMenuUnchanged() {
+        show(home = false); openMenu()
+        count(hasText("Check in")) shouldBe 0 // the fake launcher is not consulted
+        count(hasText("Add to Home")) shouldBe 0
+        count(hasText("Pin")) shouldBe 1
+    }
+
+    private fun runBlockingSeed(n: Int) = kotlinx.coroutines.runBlocking {
+        repeat(n) { i ->
+            val id = "t$i"
+            sessions.save(com.misura.core.agent.Session(id, com.misura.core.agent.SessionStatus.IDLE, 0, System.currentTimeMillis(),
+                say = com.misura.core.agent.Say.Question("Which?", listOf("A", "B"))))
+            sessions.append(id, Turn("user", buildJsonObject {
+                put("role", "user")
+                put("parts", buildJsonArray { add(buildJsonObject { put("text", "Task $i") }) })
+            }))
+        }
+    }
+}

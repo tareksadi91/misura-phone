@@ -310,7 +310,7 @@ class ShortcutKeeperTest {
         rule.waitUntil(8_000) { store.all().isEmpty() }
         rule.waitUntil(8_000) { pins.of(pkg).isEmpty() }
         pins.of(pkg) shouldBe emptySet()
-        // Home long-press ("Remove from Home") through the same keeper: the pin goes too. (The app-list menu, Task 6, adds its own assertion.)
+        // Home long-press ("Remove from Home") through the same keeper: the pin goes too. (The app-list menu route is covered in AppSheetHomeTest.onHomeRemoves, seen red when the menu removes through the store.)
         keep(ap("hold")); pins.of(pkg) shouldBe setOf("sid-hold")
         val hold = hasText("Title hold") and hasContentDescription(", shortcut", substring = true)
         rule.waitUntil(8_000) { rule.onAllNodes(hold).fetchSemanticsNodes().isNotEmpty() }

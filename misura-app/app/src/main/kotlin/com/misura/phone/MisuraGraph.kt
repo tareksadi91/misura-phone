@@ -40,6 +40,8 @@ object MisuraGraph {
     lateinit var shortcuts: com.misura.phone.shortcut.ShortcutStore; private set
     /** The one owner of every shortcut mutation (store write + pins). */
     lateinit var shortcutKeeper: com.misura.phone.shortcut.ShortcutKeeper; private set
+    /** The launcher's published shortcuts and target checks (the app list's Home items). */
+    lateinit var shortcutTargets: com.misura.phone.shortcut.ShortcutTargets; private set
     private lateinit var credentials: com.misura.phone.setup.CredentialSettings
     /** Place photos sized for the 3a's cards. */
     val photoLoader: com.misura.phone.screen.PhotoLoader = { place, photo ->
@@ -125,6 +127,7 @@ object MisuraGraph {
         shortcuts = com.misura.phone.shortcut.ShortcutStore(app)
         val shortcutLauncher = com.misura.phone.shortcut.ShortcutLauncher(app)
         shortcutKeeper = com.misura.phone.shortcut.ShortcutKeeper(shortcuts, pins = shortcutLauncher)
+        shortcutTargets = shortcutLauncher
         // A Spotify link counts only from the owner's own words in that conversation: turns stored with origin OWNER (never a saved
         // shortcut's or routine's prompt, a debug ask, a card tap or a tool result stored as "user").
         val shortcutTool = com.misura.phone.shortcut.ShortcutTool(shortcuts, shortcutKeeper,

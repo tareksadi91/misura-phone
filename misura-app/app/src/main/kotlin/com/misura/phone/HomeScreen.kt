@@ -183,7 +183,9 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
     apps: List<Pair<String, String>> = emptyList(), onOpenItem: ((ItemFact) -> Unit)? = null, appsProvider: () -> List<Pair<String, String>> = { apps }, onOpenSettings: (() -> Unit)? = null,
     shortcutStore: com.misura.phone.shortcut.ShortcutStore? = null, shortcutKeeper: com.misura.phone.shortcut.ShortcutKeeper? = null,
     /** Opens a shortcut's direct target (MisuraGraph.openTarget); false = it did not open. Never throws. */
-    openTarget: suspend (com.misura.core.shortcut.Target) -> Boolean = { false }, openApp: (String) -> Unit = {}) {
+    openTarget: suspend (com.misura.core.shortcut.Target) -> Boolean = { false },
+    /** The app list's Home items ("+ Home", "Add to Home"); null = none. */
+    sheetHome: com.misura.phone.screen.SheetHome? = null, openApp: (String) -> Unit = {}) {
     // Every shortcut mutation goes through the keeper; a Home built with only a store (tests, previews) gets one with no pin work.
     val keeper = shortcutKeeper ?: remember(shortcutStore) { shortcutStore?.let { com.misura.phone.shortcut.ShortcutKeeper(it, pins = null) } }
     var openId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -415,7 +417,7 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
                         if (!sheet.searching) { openId = it; nav = Nav() }
                     }
                 }
-                AppSheet(sheet, currentApps, openApp, onSettings = onOpenSettings)
+                AppSheet(sheet, currentApps, openApp, onSettings = onOpenSettings, home = sheetHome)
             }
             else if (o != null) {
                 val openHistory = { if (nav.top != Screen.History) nav = nav.open(Screen.History) }

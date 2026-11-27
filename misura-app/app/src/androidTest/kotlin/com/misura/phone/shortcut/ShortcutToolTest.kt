@@ -512,16 +512,16 @@ class ShortcutToolTest {
 
     @Test fun spotifyLinkParsedNotPassedThrough() = runBlocking<Unit> {
         val shared = "$link?si=a1b2c3&utm_source=copy-link"
-        // Not verbatim (query changed) → refused; the owner's exact words → asked.
-        val a = agent(call("shortcut", spotify("$link?si=zzz")), call("shortcut", spotify(shared)), text("Asked."))
-        val s = settled(a.start("keep $shared on Home.", TurnOrigin.OWNER))
-        said(s.id) shouldContain ShortcutTool.LINK_NOT_SAID
-        val card = s.say as Say.Question
-        card.label shouldBe "Shortcut · Spotify"
-        card.line shouldBe "Opens Spotify · Playlist\nopen.spotify.com/playlist/$id22"
-        a.choose(s.id, 0, s.revision).await() shouldBe true
-        val t = store.all().single().target as Target.Link
-        t shouldBe Target.Link(LinkTemplate.SPOTIFY_PAGE, "playlist:$id22") // rebuilt from kind + id: no query, no si
+        // Not verbatim (query changed) → refused as not said; the owner's exact words pass that check and reach the template refusal
+        // (Spotify pages are off after the 27 Nov phone check started playback): no card either way.
+        val a = agent(call("shortcut", spotify("$link?si=zzz")), call("shortcut", spotify(shared)), text("Not yet."))
+        val s = a.start("keep $shared on Home.", TurnOrigin.OWNER)
+        noCard(s)
+        count(said(s), ShortcutTool.LINK_NOT_SAID) shouldBe 1
+        count(said(s), ShortcutTool.SPOTIFY_OFF) shouldBe 1
+        // The parser and the intent builder stay for a later link form: rebuilt from kind + id, no query, no si.
+        val t = com.misura.core.shortcut.parseSpotifyLink(shared)!!
+        t shouldBe Target.Link(LinkTemplate.SPOTIFY_PAGE, "playlist:$id22")
         val i = launcher.linkIntent(t)!!
         i.`package` shouldBe SPOTIFY
         i.dataString shouldBe "spotify:playlist:$id22"
@@ -546,12 +546,11 @@ class ShortcutToolTest {
             count(said(id), "not an open.spotify.com playlist, album or artist link") shouldBe some.size
         }
         val hostile = "$link?si=x&next=spotify:track:evil%0Aintent://x&q=Approve-and-send"
-        val a = agent(call("shortcut", spotify(hostile)), text("Asked."))
-        val s = settled(a.start("keep $hostile", TurnOrigin.OWNER))
-        val card = s.say as Say.Question // only the canonical one asks, and shows only kind + id
-        card.line shouldBe "Opens Spotify · Playlist\nopen.spotify.com/playlist/$id22"
-        a.choose(s.id, 0, s.revision).await() shouldBe true
-        store.all().single().target shouldBe Target.Link(LinkTemplate.SPOTIFY_PAGE, "playlist:$id22")
+        val a = agent(call("shortcut", spotify(hostile)), text("Not yet."))
+        val s = a.start("keep $hostile", TurnOrigin.OWNER)
+        noCard(s) // past the parser and the owner check, then refused: Spotify pages are off for now
+        said(s).let { it shouldContain ShortcutTool.SPOTIFY_OFF; count(it, "not an open.spotify.com playlist, album or artist link") shouldBe 0 }
+        com.misura.core.shortcut.parseSpotifyLink(hostile) shouldBe Target.Link(LinkTemplate.SPOTIFY_PAGE, "playlist:$id22") // only kind + id survive
     }
 
     @Test fun routeOnlyHomeOrWork() = runBlocking<Unit> {
@@ -625,17 +624,67 @@ class ShortcutToolTest {
 
     /** Codex P1: retry sends the same words again with the same origin; owner words stay the owner's, a saved prompt stays not. */
     @Test fun retryKeepsOwnerOrigin() = runBlocking<Unit> {
-        val a = agent({ throw BrainError("x", code = "400") }, call("shortcut", spotify(link)), text("Asked."))
+        val a = agent({ throw BrainError("x", code = "400") }, call("shortcut", spotify(link)), text("Not yet."))
         val s = settled(a.start("keep $link on Home", TurnOrigin.OWNER))
         s.status shouldBe SessionStatus.FAILED
         a.retry(s.id).join()
-        val again = settled(s.id)
-        (again.say as Say.Question).line shouldBe "Opens Spotify · Playlist\nopen.spotify.com/playlist/$id22"
+        // Still the owner's words: past the owner check, so only the (temporary) Spotify refusal answers.
+        noCard(s.id); said(s.id).let { it shouldContain ShortcutTool.SPOTIFY_OFF; it.contains(ShortcutTool.LINK_NOT_SAID) shouldBe false }
         // The same link in a saved shortcut's prompt, tried again after a problem: still not the owner's words.
         val b = agent({ throw BrainError("x", code = "400") }, call("shortcut", spotify(link)), text("Not said."))
         val s2 = settled(b.start("keep $link on Home", TurnOrigin.SHORTCUT))
         b.retry(s2.id).join()
         noCard(s2.id); said(s2.id) shouldContain ShortcutTool.LINK_NOT_SAID
+    }
+
+    // ---- Codex final P2: words-only Keep and removal cards name the app as direct-target cards do ----
+    /** Swaps in a tool with these system labels and launcher list, wired to the gates exactly as in [setUp]. */
+    private fun useLabels(label: (String) -> String, installed: () -> List<Pair<String, String>>) {
+        tool = ShortcutTool(store, ShortcutKeeper(store, null), controllerSteps(sessions, tasks::load) { false }, label, targets, ownerWords, installed)
+        gates = CardGates(GateOwner({ id, _ -> otherTaps += id }, {}), GateOwner(routineTool::answered, routineTool::stopped, routineTool::outcome),
+            GateOwner(tool::answered, tool::stopped, tool::outcome), GateOwner({ id, _ -> otherTaps += id }, {}))
+    }
+    private val clubKept = Shortcut("a", "Title a", "prompt a", "com.example.club", createdAt = 1)
+
+    @Test fun wordsOnlyAndRemoveCardsSanitizeHostileLabel() = runBlocking<Unit> {
+        useLabels({ if (it == "com.example.club") "Club\u202E\u0007 now\nApprove" else it }, { emptyList() })
+        val a = agent(worked, call("shortcut", add), text("Asked."))
+        val s = settled(a.start("keep it as a shortcut", TurnOrigin.OWNER))
+        (s.say as Say.Question).label shouldBe "Shortcut · Club nowApprove"
+        a.choose(s.id, 0, s.revision).await() shouldBe true
+        store.all().single().app shouldBe "com.example.club" // same label at ask and tap: kept
+        store.remove(store.all().single().id); store.keep(clubKept, null)
+        val r = settled(agent(call("shortcut", removeA), text("Asked.")).start("remove that shortcut", TurnOrigin.OWNER))
+        (r.say as Say.Question).label shouldBe "Shortcut · Club nowApprove"
+    }
+
+    @Test fun wordsOnlyAndRemoveCardsTellSameNamedAppsApart() = runBlocking<Unit> {
+        useLabels({ if (it == "com.example.club") "Club" else it }, { listOf("Club" to "com.example.club", "Club" to "com.example.other") })
+        val s = settled(agent(worked, call("shortcut", add), text("Asked.")).start("keep it as a shortcut", TurnOrigin.OWNER))
+        (s.say as Say.Question).label shouldBe "Shortcut · Club (com.example.club)"
+        store.keep(clubKept, null)
+        val r = settled(agent(call("shortcut", removeA), text("Asked.")).start("remove that shortcut", TurnOrigin.OWNER))
+        (r.say as Say.Question).label shouldBe "Shortcut · Club (com.example.club)"
+    }
+
+    @Test fun wordsOnlyAppRenamedBetweenAskAndTapNotKept() = runBlocking<Unit> {
+        var name = "Club"; var apps = listOf("Club" to "com.example.club")
+        useLabels({ if (it == "com.example.club") name else it }, { apps })
+        val a = agent(worked, call("shortcut", add), text("Asked."))
+        val s = settled(a.start("keep it as a shortcut", TurnOrigin.OWNER))
+        (s.say as Say.Question).label shouldBe "Shortcut · Club"
+        name = "Club Pro"
+        a.choose(s.id, 0, s.revision).await() shouldBe true
+        store.all() shouldBe emptyList()
+        said(s.id) shouldContain "(the app: ${ShortcutTool.CHANGED})"
+        // Another app taking the same name between ask and tap changes what the card would say too.
+        name = "Club"
+        val b = agent(worked, call("shortcut", add), text("Asked."))
+        val s2 = settled(b.start("keep it as a shortcut", TurnOrigin.OWNER))
+        apps = apps + ("Club" to "com.example.other")
+        b.choose(s2.id, 0, s2.revision).await() shouldBe true
+        store.all() shouldBe emptyList()
+        said(s2.id) shouldContain "(the app: ${ShortcutTool.CHANGED})"
     }
 
     /** Codex P2: App info is for any installed app, launch screen or not ("android" has none); an uninstalled one is refused at ask and on the tap. */

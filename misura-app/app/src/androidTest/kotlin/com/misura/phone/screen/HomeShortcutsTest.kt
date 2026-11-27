@@ -383,6 +383,30 @@ class HomeShortcutsTest {
         o.onMain.toList() shouldBe listOf(false)
     }
 
+    /**
+     * Codex final P2: the opener suspends (a hidden-display handoff), the owner types and sends a newer request meanwhile, then the
+     * opener answers false. The newer task stays in front and the shortcut's saved words never start a second session.
+     */
+    @Test fun lateFailedOpenDoesNotReplaceANewerTask() {
+        val gate = CompletableDeferred<Boolean>()
+        val o = Opens { gate.await() }
+        val brain = Script(text("Newer done."), text("fallback must not run"))
+        keepTarget("Wifi", Target.Settings(com.misura.core.shortcut.SettingsPage.WIFI), prompt); showWith(o, agent(brain)); waitFor(line("Wifi"))
+        rule.onNode(line("Wifi")).performClick(); rule.waitUntil(5_000) { o.asked.size == 1 }
+        rule.onNodeWithContentDescription(ASK_FIELD).performTextInput("a newer request")
+        rule.onNode(hasText("Ask") and hasClickAction()).performClick()
+        rule.waitUntil(8_000) { count(hasText("Newer done.", substring = true)) > 0 }
+        gate.complete(false)
+        rule.waitUntil(5_000) { o.answers.size == 1 }
+        Thread.sleep(1_500); rule.waitForIdle()
+        val all = runBlocking { sessions.recent(5) }
+        all.size shouldBe 1
+        ((runBlocking { sessions.turns(all.single().id) }.first { it.role == "user" }.content["parts"] as JsonArray)[0] as JsonObject)["text"]
+            .let { (it as JsonPrimitive).content } shouldBe "a newer request"
+        rule.onAllNodes(hasText("Newer done.", substring = true)).fetchSemanticsNodes().isNotEmpty() shouldBe true
+        brain.tools.size shouldBe 1
+    }
+
     /** A target that opens wins even when saved words exist: the agent never starts. */
     @Test fun targetOpensWithPromptStartsNoAgent() {
         val brain = Script(text("should not run")); val o = fake()
@@ -483,16 +507,20 @@ class HomeShortcutsTest {
         store.all().map { it.title } shouldBe listOf("Focus") // only the one that was there
     }
 
-    /** The same link typed into Home's field is the owner's: the card is asked. */
+    /** The same link typed into Home's field is the owner's: it passes the owner check and only the (temporary) Spotify refusal answers, no card. */
     @Test fun linkTypedOnHomeIsTheOwners() {
-        val brain = Script(call("shortcut", keepLink), text("Asked."))
+        val brain = Script(call("shortcut", keepLink), text("Not yet."))
         show(Agent(sessions, brain, listOf(hand, shortcutTool(store)), System::currentTimeMillis, scope)); waitFor(headline)
         rule.onNodeWithContentDescription(ASK_FIELD).performTextInput("keep $link on Home")
         rule.onNode(hasText("Ask") and hasClickAction()).performClick()
         rule.waitUntil(8_000) { runBlocking { sessions.recent(5).isNotEmpty() } }
         val id = runBlocking { sessions.recent(5).single().id }
         rule.waitUntil(8_000) { runBlocking { sessions.load(id)?.status == SessionStatus.IDLE } }
-        (runBlocking { sessions.load(id) }!!.say as Say.Question).line shouldBe "Opens com.spotify.music · Playlist\nopen.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
+        val turns = runBlocking { sessions.turns(id) }.toString()
+        turns.contains(com.misura.phone.shortcut.ShortcutTool.SPOTIFY_OFF) shouldBe true
+        turns.contains(com.misura.phone.shortcut.ShortcutTool.LINK_NOT_SAID) shouldBe false
+        (runBlocking { sessions.load(id) }!!.say is Say.Question) shouldBe false
+        store.all() shouldBe emptyList()
     }
 
     @Test fun doubleTapStartsOneTask() {

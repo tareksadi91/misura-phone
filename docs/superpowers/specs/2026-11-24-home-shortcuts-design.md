@@ -67,6 +67,7 @@ Plan: `docs/superpowers/plans/2026-11-27-home-shortcuts-v2.md`. **v2 wins over e
 - Add from the app list long-press (+ Home per published shortcut, Add to Home for the app) or by telling Misura (Keep card shows code-resolved names). Remove by swipe, long-press a Home line, "On Home" in the app list, or the tool. One keeper owns every write and pins kept app shortcuts.
 - All Home lines look the same; no marker for agent-run lines (owner, 27 Nov).
 - Drag from the app list and free web/app links are out of v2.
+- **Spotify pages are off (final review, 27 Nov).** The `SPOTIFY_PAGE` template failed its phone check: opening `spotify:playlist:<id>` with `setPackage` made Spotify resume its last queue on an active Spotify Connect speaker (playback started, and not even that playlist). Creating Spotify shortcuts is off pending the owner's decision. The tool refuses with a plain note and no card; the parser and URI builder stay for a later link form; a stored one still opens.
 
 ## Precedence
 

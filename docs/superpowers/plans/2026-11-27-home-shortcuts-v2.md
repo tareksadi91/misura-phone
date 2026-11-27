@@ -18,7 +18,9 @@ Owner: a shortcut should open the app straight away, not wait for the agent, but
      | Template | URI | Param (validated by code) | Package | Checked |
      |---|---|---|---|---|
      | `MAPS_ROUTE` | `https://www.google.com/maps/dir/?api=1&destination=<p>` | `Home` or `Work` only (Maps resolves your saved places) | `com.google.android.apps.maps` | 27 Nov: opens route preview Your location → Home, Start not pressed |
-     | `SPOTIFY_PAGE` | `spotify:<kind>:<id>` | kind ∈ playlist / album / artist; id = 22 base62 chars, parsed by code from an `open.spotify.com/<kind>/<id>` link the user gives | `com.spotify.music` | 27 Nov: `spotify:` page opens, nothing plays |
+     | `SPOTIFY_PAGE` | `spotify:<kind>:<id>` | kind ∈ playlist / album / artist; id = 22 base62 chars, parsed by code from an `open.spotify.com/<kind>/<id>` link the user gives | `com.spotify.music` | ~~27 Nov: `spotify:` page opens, nothing plays~~ **Failed on the phone (final review, 27 Nov), see the note below** |
+
+     **Template note (final review, 27 Nov):** `SPOTIFY_PAGE` failed its phone check: opening `spotify:playlist:<id>` with `setPackage` made Spotify resume its last queue on an active Spotify Connect speaker (playback started, and not even that playlist). Creating Spotify shortcuts is off pending the owner's decision: the tool refuses it with "Spotify shortcuts aren't available yet: opening Spotify can start playback." and shows no card (checked after the owner-words check). The parser, the URI builder and their tests stay for a future URI form; an already-stored `SPOTIFY_PAGE` shortcut still opens (no migration).
 
      The Spotify id comes from the user, not the model: in Spotify, playlist → Share → Copy link, then paste "make a shortcut: <link>" (Spotify publishes no playlist shortcuts and no "Add to Home screen"; checked in its APK). Misura can't know which playlist you play most.
   - **Not in v2: any other link** (free web URLs, other app schemes). An app link can act on open; new templates get the same phone check and review first.

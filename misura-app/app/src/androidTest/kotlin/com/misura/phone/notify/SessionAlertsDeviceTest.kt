@@ -1,5 +1,6 @@
 package com.misura.phone.notify
 
+import com.misura.core.agent.TurnOrigin
 import android.app.Notification
 import android.app.NotificationManager
 import android.service.notification.StatusBarNotification
@@ -75,7 +76,7 @@ class SessionAlertsDeviceTest {
     }
 
     @Test fun aBackgroundAnswerPostsAPrivateResultThatOpensItsSession() = runBlocking<Unit> {
-        val id = agent(text("Hornbach closes at 20:00.")).start("when does hornbach close")
+        val id = agent(text("Hornbach closes at 20:00.")).start("when does hornbach close", TurnOrigin.OWNER)
         waitFor(5_000) { posted(SessionAlerts.resultTag(id)) != null } shouldBe true
         val n = posted(SessionAlerts.resultTag(id))!!.notification
         n.channelId shouldBe SessionAlerts.RESULTS
@@ -92,7 +93,7 @@ class SessionAlertsDeviceTest {
 
     @Test fun aQuestionNeedsYouAndItsAnswerReplacesIt() = runBlocking<Unit> {
         val a = agent(call("ask", """{"line":"Tuesday or Thursday?","choices":["Tuesday","Thursday"]}"""), text("Booked for Thursday."))
-        val id = a.start("book the dentist")
+        val id = a.start("book the dentist", TurnOrigin.OWNER)
         waitFor(5_000) { posted(SessionAlerts.needsTag(id)) != null } shouldBe true
         posted(SessionAlerts.needsTag(id))!!.notification.let { it.title shouldBe "Needs your input"; it.line shouldBe "Tuesday or Thursday?"; it.channelId shouldBe SessionAlerts.NEEDS }
         posted(SessionAlerts.resultTag(id)) shouldBe null
@@ -103,15 +104,15 @@ class SessionAlertsDeviceTest {
     }
 
     @Test fun twoSessionsGetTwoAlertsWithTheirOwnTargets() = runBlocking<Unit> {
-        val one = agent(text("first")).start("one")
-        val two = agent(text("second")).start("two")
+        val one = agent(text("first")).start("one", TurnOrigin.OWNER)
+        val two = agent(text("second")).start("two", TurnOrigin.OWNER)
         waitFor(5_000) { posted(SessionAlerts.resultTag(one)) != null && posted(SessionAlerts.resultTag(two)) != null } shouldBe true
         (posted(SessionAlerts.resultTag(one))!!.notification.contentIntent == posted(SessionAlerts.resultTag(two))!!.notification.contentIntent) shouldBe false
     }
 
     @Test fun aFreshResultAfterDismissalAlertsAgain() = runBlocking<Unit> {
         val a = agent(text("first"), text("second"))
-        val id = a.start("one")
+        val id = a.start("one", TurnOrigin.OWNER)
         waitFor(5_000) { posted(SessionAlerts.resultTag(id)) != null } shouldBe true
         nm.cancel(SessionAlerts.resultTag(id), posted(SessionAlerts.resultTag(id))!!.id) // swiped away
         a.followUp(id, "again")
@@ -121,14 +122,14 @@ class SessionAlertsDeviceTest {
     @Test fun nothingWhileTheUserIsInMisura() = runBlocking<Unit> {
         shell("input keyevent KEYCODE_WAKEUP"); shell("wm dismiss-keyguard"); Thread.sleep(500)
         SessionAlerts.front(ctx, true)
-        val id = agent(text("seen already")).start("look")
+        val id = agent(text("seen already")).start("look", TurnOrigin.OWNER)
         settledOn(id) shouldBe true
         Thread.sleep(1_000)
         posted(SessionAlerts.resultTag(id)) shouldBe null
     }
 
     @Test fun comingIntoMisuraClearsTheShadeCopies() = runBlocking<Unit> {
-        val id = agent(text("done")).start("x")
+        val id = agent(text("done")).start("x", TurnOrigin.OWNER)
         waitFor(5_000) { posted(SessionAlerts.resultTag(id)) != null } shouldBe true
         SessionAlerts.clearAll(ctx)
         waitFor(2_000) { posted(SessionAlerts.resultTag(id)) == null } shouldBe true
@@ -136,7 +137,7 @@ class SessionAlertsDeviceTest {
 
     @Test fun dismissingAWaitingQuestionTakesItsAlertAway() = runBlocking<Unit> {
         val a = agent(call("ask", """{"line":"Which one?","choices":["A","B"]}"""))
-        val id = a.start("pick")
+        val id = a.start("pick", TurnOrigin.OWNER)
         waitFor(5_000) { posted(SessionAlerts.needsTag(id)) != null } shouldBe true
         a.dismiss(id).await()
         waitFor(3_000) { posted(SessionAlerts.needsTag(id)) == null } shouldBe true
@@ -144,7 +145,7 @@ class SessionAlertsDeviceTest {
 
     @Test fun deletingASessionTakesItsResultAway() = runBlocking<Unit> {
         val a = agent(text("done"))
-        val id = a.start("x")
+        val id = a.start("x", TurnOrigin.OWNER)
         waitFor(5_000) { posted(SessionAlerts.resultTag(id)) != null } shouldBe true
         a.delete(id).await()
         waitFor(3_000) { posted(SessionAlerts.resultTag(id)) == null } shouldBe true
@@ -152,7 +153,7 @@ class SessionAlertsDeviceTest {
 
     @Test fun aStaleEventNeverPostsOverNewerState() = runBlocking<Unit> {
         val (settled, _) = SessionAlerts.hooks(ctx, store, scope)
-        val id = agent(text("old answer")).start("x")
+        val id = agent(text("old answer")).start("x", TurnOrigin.OWNER)
         settledOn(id) shouldBe true
         waitFor(5_000) { posted(SessionAlerts.resultTag(id)) != null } shouldBe true
         val seen = store.load(id)!!

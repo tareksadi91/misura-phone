@@ -320,14 +320,14 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
     }
 
     fun goHome() { openId = null; nav = Nav(); targetId = null; targetSession = null; cleared = false; earlier = false }
-    // A new task from your words: typed, spoken, or a kept shortcut's saved request (the same path, full tools).
-    suspend fun startTask(t: String) { val new = agent.start(t); openId = new; nav = Nav(); targetId = null; targetSession = null; cleared = false }
+    // A new task: typed or spoken words (OWNER), or a kept shortcut's saved request (SHORTCUT: same path, full tools, but not the owner's words now).
+    suspend fun startTask(t: String, origin: com.misura.core.agent.TurnOrigin) { val new = agent.start(t, origin); openId = new; nav = Nav(); targetId = null; targetSession = null; cleared = false }
     fun startShortcut(sc: com.misura.core.shortcut.Shortcut) {
         if (startingShortcut || sheet.moving || sheet.engaged || sheet.searching || openId != null) return
         startingShortcut = true
         scope.launch {
             try {
-                startTask(sc.prompt ?: return@launch) // target-only shortcuts open directly (v2 Task 5); none are created yet
+                startTask(sc.prompt ?: return@launch, com.misura.core.agent.TurnOrigin.SHORTCUT) // target-only shortcuts open directly (v2 Task 5); none are created yet
                 try { withContext(Dispatchers.IO) { shortcutStore?.used(sc.id, System.currentTimeMillis()) } }
                 catch (_: com.misura.phone.store.StorageUnavailableException) {} // the task runs; only its last-used time is lost
             } finally { startingShortcut = false }
@@ -555,7 +555,7 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
             fun submit(t: String, note: Looking?) {
                 val id = openId
                 scope.launch {
-                    if (id == null || cleared || finished) startTask(t)
+                    if (id == null || cleared || finished) startTask(t, com.misura.core.agent.TurnOrigin.OWNER)
                     else agent.followUp(id, t, note)
                 }
             }

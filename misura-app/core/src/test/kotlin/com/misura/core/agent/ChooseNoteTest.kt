@@ -19,7 +19,7 @@ class ChooseNoteTest {
         }
         val store = InMemorySessionStore()
         val agent = Agent(store, brain, listOf(card), { testScheduler.currentTime }, this, chooseNote = { q, i -> if (q.gate == "rt:1" && i == 0) "Not saved: there are already 20 routines" else null })
-        val id = agent.start("every day at 8 check my train"); advanceUntilIdle()
+        val id = agent.start("every day at 8 check my train", TurnOrigin.OWNER); advanceUntilIdle()
         agent.choose(id, 0, store.load(id)!!.revision).await() shouldBe true
         advanceUntilIdle()
         seen.last().last().content.toString() shouldContain "(the app: Not saved: there are already 20 routines)"

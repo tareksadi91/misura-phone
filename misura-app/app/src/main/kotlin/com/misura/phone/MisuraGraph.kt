@@ -116,7 +116,7 @@ object MisuraGraph {
         // ponytail: a fixed sum; a real fix would give the hand the time that is left.
         val (alertSettled, allSent) = com.misura.phone.notify.SessionAlerts.hooks(app, sessions, scope) { ids ->
             ids.all { tasks.load(it)?.state == com.misura.core.task.TaskState.NEEDS_APPROVAL } }
-        com.misura.phone.routine.Routines.init(app, start = { text, deny -> agent.start(text, deny) })
+        com.misura.phone.routine.Routines.init(app, start = { text, origin, deny -> agent.start(text, origin, deny) })
         val settled = { s: com.misura.core.agent.Session -> alertSettled(s); com.misura.phone.routine.Routines.settled(s) }
         val routineTool = com.misura.phone.routine.RoutineTool(com.misura.phone.routine.Routines.store, changed = { com.misura.phone.routine.Routines.resync() },
             runNow = { r -> com.misura.phone.routine.Routines.run(r, manual = true) }, launch = { work -> scope.launch { work() } })
@@ -125,7 +125,8 @@ object MisuraGraph {
         shortcuts = com.misura.phone.shortcut.ShortcutStore(app)
         val shortcutLauncher = com.misura.phone.shortcut.ShortcutLauncher(app)
         shortcutKeeper = com.misura.phone.shortcut.ShortcutKeeper(shortcuts, pins = shortcutLauncher)
-        // A Spotify link counts only from the owner's own words in that conversation (never a tool result stored as "user").
+        // A Spotify link counts only from the owner's own words in that conversation: turns stored with origin OWNER (never a saved
+        // shortcut's or routine's prompt, a debug ask, a card tap or a tool result stored as "user").
         val shortcutTool = com.misura.phone.shortcut.ShortcutTool(shortcuts, shortcutKeeper,
             com.misura.phone.shortcut.controllerSteps(sessions, tasks::load, controller::isChecking), appLabel,
             targets = shortcutLauncher, ownerWords = { id -> com.misura.core.agent.ownerUtterances(sessions.turns(id)) }, installedApps = { apps })

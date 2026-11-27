@@ -29,6 +29,8 @@ fun settingsAction(page: SettingsPage): String = when (page) {
 interface ShortcutTargets {
     fun published(pkg: String): List<ShortcutLauncher.Published>
     fun resolve(target: Target): Boolean
+    /** [pkg] is installed (a launch screen not needed), as far as package visibility lets Misura see it. */
+    fun installed(pkg: String): Boolean
 }
 
 /**
@@ -82,6 +84,14 @@ class ShortcutLauncher(
     }
 
     private fun handlerPackage(i: Intent): String? = ctx.packageManager.resolveActivity(i, 0)?.activityInfo?.packageName
+
+    /**
+     * Installed, whether or not it has a launch screen (App info opens for any installed app). Package visibility limits what this
+     * sees: an app with a launcher activity, a package in the manifest's `<queries>`, or a system package; any other app without a
+     * launcher reads as not installed (never QUERY_ALL_PACKAGES).
+     */
+    override fun installed(pkg: String): Boolean =
+        runCatching { ctx.packageManager.getApplicationInfo(pkg, android.content.pm.PackageManager.ApplicationInfoFlags.of(0)); true }.getOrDefault(false)
 
     /** True when [target] can open right now: the app has a launch screen, the shortcut still exists and is enabled, the Settings page or link has a handler. */
     override fun resolve(target: Target): Boolean = when (target) {

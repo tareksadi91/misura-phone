@@ -45,7 +45,7 @@ class DismissTest {
     @Test fun dismissBeforeWorkerStartsDoesNotStartTheModel() = runTest {
         val store = InMemorySessionStore()
         val agent = Agent(store, ScriptedBrain(), emptyList(), { 5L }, this)
-        val id = agent.start("work")
+        val id = agent.start("work", TurnOrigin.OWNER)
         agent.dismiss(id).await()
         store.load(id)!!.say shouldBe Say.Answer("Stopped.")
         store.load(id)!!.dismissedAt shouldBe 5L
@@ -62,7 +62,7 @@ class DismissTest {
             override suspend fun run(args: JsonObject): JsonObject { entered.complete(Unit); awaitCancellation() }
         }
         val agent = Agent(store, ScriptedBrain(call("working"), text("New answer")), listOf(tool), { testScheduler.currentTime }, this)
-        val id = agent.start("work"); runCurrent(); entered.await()
+        val id = agent.start("work", TurnOrigin.OWNER); runCurrent(); entered.await()
         agent.dismiss(id).await()
         store.load(id)!!.let { s ->
             s.status shouldBe SessionStatus.IDLE

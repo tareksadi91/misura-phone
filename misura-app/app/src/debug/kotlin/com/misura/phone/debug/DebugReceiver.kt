@@ -103,7 +103,7 @@ class DebugReceiver : BroadcastReceiver() {
                     "export" -> SpikeReport.write(ctx, id)
                     // Asks Misura as if typed, and opens the task: live runs without fighting the keyboard over adb.
                     "ask" -> i.getStringExtra("text")?.takeIf { it.isNotBlank() }?.let { t ->
-                        val session = MisuraGraph.agent.start(t)
+                        val session = MisuraGraph.agent.start(t, com.misura.core.agent.TurnOrigin.DEBUG) // diagnostic input, not the owner's words
                         ctx.startActivity(android.content.Intent(ctx, com.misura.phone.HomeActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("session", session))
                     }
                     "seed" -> {

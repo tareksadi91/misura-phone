@@ -25,6 +25,8 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -232,6 +234,43 @@ class HomeShortcutsTest {
         rule.waitUntil(8_000) { count(hasText("Checked in.", substring = true)) > 0 }
         rule.onAllNodes(line("Club check-in")).assertCountEquals(0)
         rule.waitUntil(5_000) { store.all().single().lastUsedAt != null }
+    }
+
+    /** The real shortcut tool, wired as MisuraGraph wires it: the link check reads the owner's utterances from this session's stored turns. */
+    private fun shortcutTool(shortcuts: com.misura.phone.shortcut.ShortcutStore) = com.misura.phone.shortcut.ShortcutTool(shortcuts,
+        com.misura.phone.shortcut.ShortcutKeeper(shortcuts, null), com.misura.phone.shortcut.controllerSteps(sessions, com.misura.phone.store.RoomTaskStore(db)::load) { false },
+        { it }, object : com.misura.phone.shortcut.ShortcutTargets {
+            override fun published(pkg: String) = emptyList<com.misura.phone.shortcut.ShortcutLauncher.Published>()
+            override fun resolve(target: com.misura.core.shortcut.Target) = true // Spotify is not on the emulator: the link check is what is under test
+            override fun installed(pkg: String) = true
+        }, ownerWords = { id -> com.misura.core.agent.ownerUtterances(sessions.turns(id)) })
+    private val link = "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
+    private val keepLink = """{"action":"add","title":"Focus","target":{"kind":"spotify","link":"$link"}}"""
+
+    /** Codex P1: a kept shortcut's saved prompt runs from a Home tap, but it is not the owner's words now: a link only there can't make a shortcut. */
+    @Test fun linkOnlyInSavedPromptIsNotTheOwners() {
+        keep("Focus", "keep $link on Home")
+        val brain = Script(call("shortcut", keepLink), text("Not said."))
+        show(Agent(sessions, brain, listOf(hand, shortcutTool(store)), System::currentTimeMillis, scope)); waitFor(line("Focus"))
+        rule.onNode(line("Focus")).performClick()
+        rule.waitUntil(8_000) { runBlocking { sessions.recent(5).isNotEmpty() } }
+        val id = runBlocking { sessions.recent(5).single().id }
+        rule.waitUntil(8_000) { runBlocking { sessions.load(id)?.status == SessionStatus.IDLE } }
+        runBlocking { sessions.turns(id) }.toString().contains(com.misura.phone.shortcut.ShortcutTool.LINK_NOT_SAID) shouldBe true
+        (runBlocking { sessions.load(id) }!!.say is Say.Question) shouldBe false
+        store.all().map { it.title } shouldBe listOf("Focus") // only the one that was there
+    }
+
+    /** The same link typed into Home's field is the owner's: the card is asked. */
+    @Test fun linkTypedOnHomeIsTheOwners() {
+        val brain = Script(call("shortcut", keepLink), text("Asked."))
+        show(Agent(sessions, brain, listOf(hand, shortcutTool(store)), System::currentTimeMillis, scope)); waitFor(headline)
+        rule.onNodeWithContentDescription(ASK_FIELD).performTextInput("keep $link on Home")
+        rule.onNode(hasText("Ask") and hasClickAction()).performClick()
+        rule.waitUntil(8_000) { runBlocking { sessions.recent(5).isNotEmpty() } }
+        val id = runBlocking { sessions.recent(5).single().id }
+        rule.waitUntil(8_000) { runBlocking { sessions.load(id)?.status == SessionStatus.IDLE } }
+        (runBlocking { sessions.load(id) }!!.say as Say.Question).line shouldBe "Opens com.spotify.music · Playlist\nopen.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
     }
 
     @Test fun doubleTapStartsOneTask() {

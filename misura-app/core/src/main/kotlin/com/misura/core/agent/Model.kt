@@ -34,8 +34,16 @@ fun Session.upgraded(): Session {
     return copy(say = say, legacyCard = null)
 }
 
-/** One Gemini `Content` object, kept verbatim (thoughtSignature included). */
-@Serializable data class Turn(val role: String, val content: JsonObject)
+/**
+ * Who put a user turn's text there. Code sets it when it writes the turn; it lives outside [Turn.content], so the model never sees
+ * or writes it. Only [OWNER] is the owner's own typed or spoken words in this conversation (start from the field or voice, follow-up,
+ * words a running step took). A saved shortcut's or a routine's prompt, a debug ask and the app's own turns (card taps, sent notes)
+ * are not: their text may have been written by the model in an earlier conversation.
+ */
+enum class TurnOrigin { OWNER, SHORTCUT, ROUTINE, DEBUG, APP }
+
+/** One Gemini `Content` object, kept verbatim (thoughtSignature included). [origin]: see [TurnOrigin]; null on model turns, tool responses and turns stored before it existed. */
+@Serializable data class Turn(val role: String, val content: JsonObject, val origin: TurnOrigin? = null)
 
 data class ToolSpec(val name: String, val description: String, val parameters: JsonObject)
 /** [id] is the model's own call id; null when the model gave none (then none goes back on the wire). */

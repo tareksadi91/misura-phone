@@ -139,7 +139,9 @@ class ShortcutTool(
             is Target.App -> Snapshot(identity(t.pkg), null)
             is Target.AppShortcut -> targets.published(t.pkg).firstOrNull { it.id == t.id && it.enabled }
                 ?.let { p -> safeAppLabel(p.label).takeIf { it.isNotBlank() } }?.let { Snapshot(identity(t.pkg), it) }
-            is Target.Settings -> Snapshot("Settings", if (t.page == SettingsPage.APP_DETAILS) "App info · ${identity(t.subjectPackage!!)}" else PAGE_NAMES.getValue(t.page))
+            // App info: the subject must still be installed (the Settings handler resolves for any package name), at ask and on the Keep tap.
+            is Target.Settings -> if (t.page != SettingsPage.APP_DETAILS) Snapshot("Settings", PAGE_NAMES.getValue(t.page))
+                else t.subjectPackage!!.takeIf { targets.installed(it) }?.let { Snapshot("Settings", "App info · ${identity(it)}") }
             is Target.Link -> when (t.template) {
                 LinkTemplate.MAPS_ROUTE -> Snapshot(identity(t.pkg!!), "Route to ${t.param}")
                 LinkTemplate.SPOTIFY_PAGE -> Snapshot(identity(t.pkg!!), t.param.substringBefore(':').replaceFirstChar { it.uppercase() })
@@ -171,7 +173,8 @@ class ShortcutTool(
                 val page = SettingsPage.entries.firstOrNull { it.name == f("page") } ?: throw Bad("target.page must be one of ${SettingsPage.entries.joinToString(", ")}")
                 val subject = o.s("subject")
                 if (page == SettingsPage.APP_DETAILS) {
-                    if (subject == null || !targets.resolve(Target.App(subject))) throw Bad("APP_DETAILS needs subject = an installed app's package")
+                    // Installed, not launchable: App info is for any installed app, with or without a launch screen.
+                    if (subject == null || !targets.installed(subject)) throw Bad("APP_DETAILS needs subject = an installed app's package")
                     Target.Settings(page, subject)
                 } else if (subject != null) throw Bad("only APP_DETAILS takes a subject") else Target.Settings(page)
             }

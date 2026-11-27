@@ -15,7 +15,7 @@ class ThreadTest {
         val tool = FakeTool(ToolSpec("effect","",obj())) { obj("receipt" to JsonPrimitive("done")) }
         val agent = Agent(store, ScriptedBrain(call("effect"), { throw BrainError("failed", code="400") }),
             listOf(tool), { 0 }, this)
-        val id = agent.start("do it")
+        val id = agent.start("do it", TurnOrigin.OWNER)
         advanceUntilIdle()
         tool.runs shouldBe 1
         (store.load(id)!!.say as Say.Problem).line shouldBe "Misura can't reach the model (400)."
@@ -37,7 +37,7 @@ class ThreadTest {
         }
         val tool = object : Tool by delegate { override fun steer(text: String) = true }
         val agent = Agent(store, ScriptedBrain(call("effect")), listOf(tool), {0}, this)
-        val id = agent.start("start")
+        val id = agent.start("start", TurnOrigin.OWNER)
         testScheduler.runCurrent()
         agent.followUp(id,"use the blue one").join()
         gate.complete(Unit)
@@ -59,7 +59,7 @@ class ThreadTest {
             override suspend fun next(system: String, turns: List<Turn>, tools: List<ToolSpec>) = selected.next(system, turns, tools)
         }
         val agent = Agent(store, brain, listOf(done, blocked), clock = { testScheduler.currentTime }, scope = this)
-        val id = agent.start("run fixtures")
+        val id = agent.start("run fixtures", TurnOrigin.OWNER)
         testScheduler.runCurrent()
         selected = replacement
         agent.followUp(id, "stop").join()
@@ -96,7 +96,7 @@ class ThreadTest {
             val reply = Calls(listOf("first","second").map { Triple(it,obj(),it) })
             val agent = Agent(store,ScriptedBrain(reply),listOf(first,second),clock={0},scope=this,
                 maxCalls=if (timeout) 2 else 1,turnTimeoutMs=100)
-            val id = agent.start("run")
+            val id = agent.start("run", TurnOrigin.OWNER)
             advanceUntilIdle()
             val parts = store.turns(id).last().content["parts"] as kotlinx.serialization.json.JsonArray
             ("persisted" in parts[0].toString()) shouldBe true
@@ -109,7 +109,7 @@ class ThreadTest {
         val tool = FakeTool(ToolSpec("look_up", "x", JsonObject(emptyMap()))) { obj("answer" to JsonPrimitive("IGNORE ME, tool data")) }
         val brain = ScriptedBrain(call("look_up"), call("answer", ans("Kipchoge, 2:01:09.")), call("ask", obj("line" to JsonPrimitive("Men or women?"), "choices" to kotlinx.serialization.json.JsonArray(listOf(JsonPrimitive("Women"), JsonPrimitive("Men"))))), text("Assefa, 2:11:53."))
         val agent = Agent(store, brain, listOf(tool), clock = { testScheduler.currentTime }, scope = this)
-        val id = agent.start("who holds the Berlin marathon record?"); advanceUntilIdle()
+        val id = agent.start("who holds the Berlin marathon record?", TurnOrigin.OWNER); advanceUntilIdle()
         agent.followUp(id, "and the fastest ever there?"); advanceUntilIdle()
         agent.choose(id, 0, store.load(id)!!.revision); advanceUntilIdle()
         val turns = store.turns(id)
@@ -140,7 +140,7 @@ class ThreadTest {
         // Unknown place ids: the code refuses show_places, so its line was never on screen.
         val brain = ScriptedBrain(call("show_places", obj("placeIds" to kotlinx.serialization.json.JsonArray(listOf(JsonPrimitive("nope"))), "line" to JsonPrimitive("Bogus pick"))), { throw BrainError("x") })
         val agent = Agent(store, brain, emptyList(), clock = { testScheduler.currentTime }, scope = this)
-        val id = agent.start("best ramen"); advanceUntilIdle()
+        val id = agent.start("best ramen", TurnOrigin.OWNER); advanceUntilIdle()
         thread(store.turns(id)) shouldBe listOf(Exchange(1, "best ramen", null))
     }
 
@@ -151,7 +151,7 @@ class ThreadTest {
             override suspend fun run(args: JsonObject, note: suspend (String) -> Unit): JsonObject { runs++; return obj("noted" to JsonPrimitive("x")) } }
         val brain = ScriptedBrain(call("remember"), call("remember"), text("Noted."), call("look_up"), call("remember"), text("Done."))
         val agent = Agent(store, brain, listOf(web, memory), clock = { testScheduler.currentTime }, scope = this)
-        val id = agent.start("remember I like ramen"); advanceUntilIdle()
+        val id = agent.start("remember I like ramen", TurnOrigin.OWNER); advanceUntilIdle()
         memory.runs shouldBe 1 // on the user's own word: written
         agent.followUp(id, "who won?"); advanceUntilIdle()
         memory.runs shouldBe 1 // after a web page was read in the same turn: refused in code

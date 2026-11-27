@@ -1,5 +1,6 @@
 package com.misura.phone.shortcut
 
+import com.misura.core.agent.TurnOrigin
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -265,7 +266,7 @@ class ShortcutKeeperTest {
         var titlesWhenNoteArrived: List<String>? = null
         val finalReply = { titlesWhenNoteArrived = store.all().map { it.title }; text("Kept.")() }
         val (a, _) = toolAgent(call("use_app", """{"app":"$pkg","goal":"book"}"""), call("shortcut", add), finalReply)
-        val s = settled(a.start("book my class and keep it as a shortcut"))
+        val s = settled(a.start("book my class and keep it as a shortcut", TurnOrigin.OWNER))
         (s.say as Say.Question).gate!! shouldContain "sc:"
         val inside = CountDownLatch(1); val release = CountDownLatch(1)
         var slow: Thread? = null
@@ -294,7 +295,7 @@ class ShortcutKeeperTest {
         keep(ap("t")); keep(ap("sw"))
         pins.of(pkg) shouldBe setOf("sid-t", "sid-sw")
         val (a, _) = toolAgent(call("shortcut", """{"action":"remove","id":"t"}"""), text("Removed."))
-        val s = settled(a.start("remove that shortcut"))
+        val s = settled(a.start("remove that shortcut", TurnOrigin.OWNER))
         a.choose(s.id, 0, s.revision).await() shouldBe true
         store.all().map { it.id } shouldBe listOf("sw")
         pins.of(pkg) shouldBe setOf("sid-sw")

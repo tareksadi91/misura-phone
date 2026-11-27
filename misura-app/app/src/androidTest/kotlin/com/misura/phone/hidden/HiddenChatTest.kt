@@ -1,5 +1,6 @@
 package com.misura.phone.hidden
 
+import com.misura.core.agent.TurnOrigin
 import android.app.UiAutomation
 import android.os.ParcelFileDescriptor
 import android.view.accessibility.AccessibilityWindowInfo
@@ -1739,7 +1740,7 @@ class HiddenChatTest {
                 }
                 val agent = com.misura.core.agent.Agent(store, main, listOf(hand), System::currentTimeMillis, scope, turnTimeoutMs = 300_000)
                 shell("logcat -c")
-                val id = agent.start("gyms near me")
+                val id = agent.start("gyms near me", TurnOrigin.OWNER)
                 var ended = false
                 repeat(900) { if (!ended) { ended = store.load(id)?.status != com.misura.core.agent.SessionStatus.THINKING; if (!ended) delay(200) } }
                 check(ended) { "turn never ended" }

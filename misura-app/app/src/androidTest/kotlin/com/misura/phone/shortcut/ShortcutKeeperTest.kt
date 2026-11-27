@@ -12,16 +12,12 @@ import com.misura.core.agent.BrainReply
 import com.misura.core.agent.Say
 import com.misura.core.agent.Session
 import com.misura.core.agent.SessionStatus
-import com.misura.core.agent.Step
-import com.misura.core.agent.StepState
 import com.misura.core.agent.Tool
 import com.misura.core.agent.ToolCall
 import com.misura.core.agent.ToolSpec
 import com.misura.core.agent.Turn
 import com.misura.core.shortcut.Shortcut
 import com.misura.core.shortcut.Target
-import com.misura.phone.CardGates
-import com.misura.phone.GateOwner
 import com.misura.phone.HomeScreen
 import com.misura.phone.cardGates
 import com.misura.phone.hands.Calendar
@@ -73,7 +69,10 @@ class ShortcutKeeperTest {
         @Volatile var queryFails = false
         @Volatile var pinFails = false
         @Volatile var slowQueryMs = 0L
-        val pinCalls = java.util.concurrent.CopyOnWriteArrayList<Pair<String, Set<String>>>()
+        /** Each pin() call: the set written and the kept shortcut ids in the store at that moment. */
+        data class Call(val ids: Set<String>, val storeIds: List<String>)
+        @Volatile var storeIds: () -> List<String> = { emptyList() }
+        val pinCalls = java.util.concurrent.CopyOnWriteArrayList<Call>()
         override fun rawPinned(pkg: String): Set<String>? {
             if (queryFails) return null
             val seen = synchronized(this) { pinned[pkg].orEmpty() }
@@ -81,7 +80,7 @@ class ShortcutKeeperTest {
             return seen
         }
         override fun pin(pkg: String, ids: Set<String>): Boolean {
-            pinCalls += pkg to ids
+            pinCalls += Call(ids, storeIds())
             if (pinFails) return false
             synchronized(this) { pinned[pkg] = ids }
             return true
@@ -98,7 +97,7 @@ class ShortcutKeeperTest {
         ctx.getSharedPreferences("shortcuts", android.content.Context.MODE_PRIVATE).edit().clear().commit()
         ctx.getSharedPreferences("routines", android.content.Context.MODE_PRIVATE).edit().clear().commit()
         ctx.getSharedPreferences("first-use", 0).edit().putBoolean("apps-opened", true).commit()
-        store = ShortcutStore(ctx); pins = FakePins(); keeper = ShortcutKeeper(store, pins)
+        store = ShortcutStore(ctx); pins = FakePins(); pins.storeIds = { store.all().map { it.id } }; keeper = ShortcutKeeper(store, pins)
     }
     @After fun tearDown() {
         ctx.getSharedPreferences("shortcuts", android.content.Context.MODE_PRIVATE).edit().clear().commit()
@@ -131,6 +130,20 @@ class ShortcutKeeperTest {
         // the same app shortcut kept twice (a replace to itself): its pin stays
         keep(ap("d", sid = "sid-c"), replacing = "c") shouldBe KeepResult.Kept
         pins.of(pkg) shouldBe setOf("sid-b", "sid-c")
+    }
+
+    /** Write first, then pin the new one, then unpin the old: the store already holds the new list at both pin callbacks. */
+    @Test fun replaceOrdersWriteThenPinNewThenUnpinOld() {
+        keep(ap("a"))
+        pins.pinCalls.clear()
+        keep(ap("c"), replacing = "a") shouldBe KeepResult.Kept
+        pins.pinCalls.toList() shouldBe listOf(
+            FakePins.Call(setOf("sid-a", "sid-c"), listOf("c")), // pin new: the replacement is already written, the old still pinned
+            FakePins.Call(setOf("sid-c"), listOf("c")))           // then unpin the old
+        keep(ap("d"))
+        pins.pinCalls.clear()
+        keeper.remove("c") shouldBe true
+        pins.pinCalls.toList() shouldBe listOf(FakePins.Call(setOf("sid-d"), listOf("d"))) // removal: unpinned after the write
     }
 
     @Test fun onlyAppShortcutsArePinned() {
@@ -235,19 +248,28 @@ class ShortcutKeeperTest {
         return sessions.load(id)!!
     }
 
-    /** The tool's Keep tap holds up behind a slow keeper; the outcome the model is told still reflects the write (Agent.choose reads it right after the gate action). */
+    /**
+     * The tool's Keep tap waits behind another keeper call (held by a latch, not a sleep). The outcome note the model is told must not
+     * arrive before the write: the next Brain call, made when that note arrives, looks at the store itself.
+     */
     @Test fun delayedWriteThroughRealAgentChoose() = runBlocking<Unit> {
         val add = """{"action":"add","title":"Book my class","prompt":"Book the 7 pm class at my club"}"""
-        val (a, _) = toolAgent(call("use_app", """{"app":"$pkg","goal":"book"}"""), call("shortcut", add), text("Kept."))
+        var titlesWhenNoteArrived: List<String>? = null
+        val finalReply = { titlesWhenNoteArrived = store.all().map { it.title }; text("Kept.")() }
+        val (a, _) = toolAgent(call("use_app", """{"app":"$pkg","goal":"book"}"""), call("shortcut", add), finalReply)
         val s = settled(a.start("book my class and keep it as a shortcut"))
         (s.say as Say.Question).gate!! shouldContain "sc:"
-        val inside = CountDownLatch(1)
-        val slow = thread { keeper.keep(ap("other"), null) { inside.countDown(); Thread.sleep(1_500); true } } // someone else is mid-write
+        val inside = CountDownLatch(1); val release = CountDownLatch(1)
+        val slow = thread { keeper.keep(ap("other"), null) { inside.countDown(); release.await(10, TimeUnit.SECONDS); true } } // someone else is mid-write
         inside.await(5, TimeUnit.SECONDS) shouldBe true
-        store.all().map { it.id } shouldBe emptyList() // not even the slow one has written yet
-        a.choose(s.id, 0, s.revision).await() shouldBe true
+        val tap = a.choose(s.id, 0, s.revision)
+        Thread.sleep(500)
+        tap.isCompleted shouldBe false // the tap is still waiting for the write
+        titlesWhenNoteArrived shouldBe null // and no note has reached the model
+        release.countDown()
+        tap.await() shouldBe true
         slow.join(10_000)
-        store.all().map { it.title } shouldBe listOf("Title other", "Book my class")
+        titlesWhenNoteArrived shouldBe listOf("Title other", "Book my class") // the write was there when the note arrived
         sessions.turns(s.id).toString() shouldContain "(the app: Kept: Book my class)"
     }
 

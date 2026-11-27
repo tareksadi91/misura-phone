@@ -33,6 +33,7 @@ import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -62,6 +63,8 @@ class ShortcutKeeperTest {
     private lateinit var keeper: ShortcutKeeper
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pkg = "com.example.club"
+    /** Cancels the agent scope (its gate workers and turns) and waits, bounded, so nothing outlives the test. */
+    private fun stopScope() { runBlocking { kotlinx.coroutines.withTimeoutOrNull<Unit>(10_000) { scope.coroutineContext[kotlinx.coroutines.Job]!!.cancelAndJoin() } } }
 
     /** The launcher's pinned set per package: `pin` replaces the whole set (Android's pinShortcuts), like the real thing. */
     private class FakePins : ShortcutPins {
@@ -100,6 +103,7 @@ class ShortcutKeeperTest {
         store = ShortcutStore(ctx); pins = FakePins(); pins.storeIds = { store.all().map { it.id } }; keeper = ShortcutKeeper(store, pins)
     }
     @After fun tearDown() {
+        stopScope() // agents and gate workers stop before prefs and the DB go
         ctx.getSharedPreferences("shortcuts", android.content.Context.MODE_PRIVATE).edit().clear().commit()
         ctx.getSharedPreferences("routines", android.content.Context.MODE_PRIVATE).edit().clear().commit()
         ctx.getSharedPreferences("first-use", 0).edit().clear().commit()
@@ -260,17 +264,24 @@ class ShortcutKeeperTest {
         val s = settled(a.start("book my class and keep it as a shortcut"))
         (s.say as Say.Question).gate!! shouldContain "sc:"
         val inside = CountDownLatch(1); val release = CountDownLatch(1)
-        val slow = thread { keeper.keep(ap("other"), null) { inside.countDown(); release.await(10, TimeUnit.SECONDS); true } } // someone else is mid-write
-        inside.await(5, TimeUnit.SECONDS) shouldBe true
-        val tap = a.choose(s.id, 0, s.revision)
-        Thread.sleep(500)
-        tap.isCompleted shouldBe false // the tap is still waiting for the write
-        titlesWhenNoteArrived shouldBe null // and no note has reached the model
-        release.countDown()
-        tap.await() shouldBe true
-        slow.join(10_000)
-        titlesWhenNoteArrived shouldBe listOf("Title other", "Book my class") // the write was there when the note arrived
-        sessions.turns(s.id).toString() shouldContain "(the app: Kept: Book my class)"
+        var slow: Thread? = null
+        try {
+            slow = thread { keeper.keep(ap("other"), null) { inside.countDown(); release.await(10, TimeUnit.SECONDS); true } } // someone else is mid-write
+            inside.await(5, TimeUnit.SECONDS) shouldBe true
+            val tap = a.choose(s.id, 0, s.revision)
+            Thread.sleep(500)
+            tap.isCompleted shouldBe false // the tap is still waiting for the write
+            titlesWhenNoteArrived shouldBe null // and no note has reached the model
+            release.countDown()
+            kotlinx.coroutines.withTimeout(10_000) { tap.await() } shouldBe true
+            slow.join(10_000); slow.isAlive shouldBe false
+            titlesWhenNoteArrived shouldBe listOf("Title other", "Book my class") // the write was there when the note arrived
+            sessions.turns(s.id).toString() shouldContain "(the app: Kept: Book my class)"
+        } finally { // a failed assertion must not leave the holder blocked or a worker alive for the next test
+            release.countDown()
+            slow?.join(10_000)
+            stopScope()
+        }
     }
 
     @Test fun everyRemovalRouteUnpins() = runBlocking<Unit> {

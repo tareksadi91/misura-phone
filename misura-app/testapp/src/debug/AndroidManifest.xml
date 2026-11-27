@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Debug-only fixture for the shortcut launcher tests: a receiver that publishes dynamic shortcuts, and the (non-exported) page they open. -->
+    <application>
+        <activity android:name=".FixtureTargetActivity" android:exported="false" />
+        <receiver android:name=".ShortcutControl" android:exported="true">
+            <intent-filter><action android:name="com.misura.testapp.SHORTCUTS" /></intent-filter>
+        </receiver>
+    </application>
+</manifest>

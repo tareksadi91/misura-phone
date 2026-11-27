@@ -24,6 +24,7 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import kotlin.concurrent.thread
+import com.misura.phone.hands.CommitGate
 import org.junit.runner.RunWith
 
 /** Needs Shizuku running with Misura granted. Enables Misura's accessibility service itself. */
@@ -953,6 +954,34 @@ class HiddenChatTest {
         // The parked task was moved over, not killed: the app is on the main screen, in front, and the user can read it.
         waitFor { ScreenReader.userIsInApp(TEST_PKG) } shouldBe true
         screen.taskDisplayOf(TEST_PKG) shouldBe 0
+        shell("am force-stop $TEST_PKG")
+    }
+
+    /**
+     * Home's route for a shortcut: the hand owns the fixture with a send card pending; openTarget brings the app to the real display, then the
+     * fixture's shortcut opens there, and the pending card is still pending (opening never answers or consumes it).
+     */
+    @Test fun parkedFixtureIsBroughtBackThenShortcutOpens(): Unit = runBlocking {
+        seedChat()
+        shell("am broadcast --include-stopped-packages -a com.misura.testapp.SHORTCUTS -p $TEST_PKG --es op publish")
+        shell("run-as $TEST_PKG rm -f files/opened.txt")
+        val hand = parkHand(openFriend, typeText("hello there"), tapSend)
+        val first = hand.run(parkGoal("send hello there to FriendB"))
+        val id = askId(first)
+        hand.parkedSession.shouldNotBeNull()
+        val asked = CommitGate::class.java.getDeclaredField("asked").also { it.isAccessible = true }
+        val pending = { (asked.get(hand.gate) as Map<*, *>).containsKey(id) }
+        pending() shouldBe true
+        val prior = com.misura.phone.MisuraGraph.bringParked
+        com.misura.phone.MisuraGraph.bringParked = hand::bringParked
+        try {
+            com.misura.phone.MisuraGraph.openTarget(ctx, com.misura.core.shortcut.Target.AppShortcut(TEST_PKG, "fx_a")) shouldBe true
+        } finally { com.misura.phone.MisuraGraph.bringParked = prior }
+        hand.parkedSession shouldBe null                  // the hand let go: the task moved
+        screen.taskDisplayOf(TEST_PKG) shouldBe 0         // and it lives on the real display
+        waitFor { shell("run-as $TEST_PKG cat files/opened.txt").trim() == "opened=fx_a" } shouldBe true
+        pending() shouldBe true                           // the approval card was neither consumed nor answered
+        shell("am broadcast --include-stopped-packages -a com.misura.testapp.SHORTCUTS -p $TEST_PKG --es op remove")
         shell("am force-stop $TEST_PKG")
     }
 

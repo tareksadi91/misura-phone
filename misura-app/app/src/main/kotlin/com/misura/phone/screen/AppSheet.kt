@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Process
 import android.provider.Settings
 import android.widget.Toast
+import kotlinx.coroutines.launch
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -262,9 +263,12 @@ fun launchSheetEntry(context: Context, state: AppSheetState, entry: SheetEntry, 
     runCatching {
         if (entry.shortcutId == null) openApp(entry.pkg)
         else {
-            val launcher = checkNotNull(context.getSystemService(LauncherApps::class.java))
-            launcher.startShortcut(entry.pkg, entry.shortcutId, null, null, Process.myUserHandle())
-            state.store.launched(entry.pkg)
+            // The same handoff as Home's app tap: a screen parked on this app comes back first, then the shortcut opens (it counts as a launch there).
+            val toast = { Toast.makeText(context, "Couldn't open ${entry.name}", Toast.LENGTH_SHORT).show() }
+            com.misura.phone.MisuraGraph.scope.launch {
+                val opened = runCatching { com.misura.phone.MisuraGraph.openTarget(context, com.misura.core.shortcut.Target.AppShortcut(entry.pkg, entry.shortcutId)) }.getOrDefault(false)
+                if (!opened) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { toast() }
+            }
         }
     }.onFailure { Toast.makeText(context, "Couldn't open ${entry.name}", Toast.LENGTH_SHORT).show() }
     state.close()

@@ -56,6 +56,13 @@ object MisuraGraph {
     /** Open an app: a screen parked on it comes to the main screen instead of the app being launched again (see UseApp.bringParked). */
     @Volatile var bringParked: suspend (String) -> Boolean = { false }
 
+    /**
+     * Opens a shortcut's direct target for the user (Home tap, app sheet): the parked-screen handoff first, then the destination. Never touches the
+     * approval gate or the controller, so opening cannot consume or answer a pending approval. False = it did not open.
+     */
+    suspend fun openTarget(ctx: Context, target: com.misura.core.shortcut.Target): Boolean =
+        com.misura.phone.shortcut.ShortcutLauncher(ctx).open(target) { bringParked(it) }
+
     /** Resolves the handler first and pins it, so a protected app is never the one that opens; Android's chooser is left to the owner. */
     internal fun openDirections(app: Context, url: String) {
         val i = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -112,8 +119,7 @@ object MisuraGraph {
         val appLabel = { pkg: String -> runCatching { app.packageManager.getApplicationLabel(app.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg) }
         // Steps as Home shows them (a send follows its task), so only a confirmed send counts as a run that worked.
         shortcuts = com.misura.phone.shortcut.ShortcutStore(app)
-        // Task 3 passes the LauncherApps-backed pins here; null = the keeper does store work only, no pin changes.
-        shortcutKeeper = com.misura.phone.shortcut.ShortcutKeeper(shortcuts, pins = null)
+        shortcutKeeper = com.misura.phone.shortcut.ShortcutKeeper(shortcuts, pins = com.misura.phone.shortcut.ShortcutLauncher(app))
         val shortcutTool = com.misura.phone.shortcut.ShortcutTool(shortcuts, shortcutKeeper,
             com.misura.phone.shortcut.controllerSteps(sessions, tasks::load, controller::isChecking), appLabel)
         val gates = cardGates(calendar, routineTool, shortcutTool, useApp)

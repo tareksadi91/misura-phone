@@ -1,5 +1,7 @@
 # Home Shortcuts (Phase 1) Implementation Plan
 
+> **Superseded in part (27 Nov 2026):** tap, replacement and making a shortcut are reworked by `2026-11-27-home-shortcuts-v2.md`; v2 wins where they differ.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Kept shortcuts appear as lines on Misura's Home under anything that needs you; one tap reruns the task. 1a: made by telling Misura. 1b: Misura offers to keep a task you repeat.

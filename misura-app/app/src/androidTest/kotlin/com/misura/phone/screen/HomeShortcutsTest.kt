@@ -332,10 +332,19 @@ class HomeShortcutsTest {
         tearFixture()
     }
 
+    /**
+     * Maps really opens in these tests. Without location granted it shows its permission dialog, which outlives HOME and a
+     * force-stop and covers the next test's activity (the full suite hung there): grant it first, and close Maps after.
+     */
+    private val mapsPkg = "com.google.android.apps.maps"
+    private fun quietMaps() { listOf("ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION").forEach { shell("pm grant $mapsPkg android.permission.$it") } }
+    private fun closeMaps() { shell("input keyevent KEYCODE_HOME"); Thread.sleep(500); shell("am force-stop $mapsPkg") }
+
     /** A kept Maps link whose handler is then disabled (controlled disappearance): the tap fails safely with the inline text; re-enabled, it opens. */
     @Test fun linkWithMissingHandlerFailsSafely() {
         val maps = Target.Link(LinkTemplate.MAPS_ROUTE, "Home"); val maps_pkg = "com.google.android.apps.maps"
         check(ShortcutLauncher(ctx).resolve(maps)) { "Maps must be on the test device" }
+        quietMaps()
         val o = real(); keepTarget("Route", maps); showWith(o); waitFor(line("Route"))
         try {
             shell("pm disable-user --user 0 $maps_pkg")
@@ -343,12 +352,12 @@ class HomeShortcutsTest {
             rule.onNode(line("Route")).performClick()
             waitFor(failure); o.answers.toList() shouldBe listOf(false)
             rule.onAllNodes(line("Route")).assertCountEquals(1)
-        } finally { shell("pm enable --user 0 $maps_pkg") }
+        } finally { shell("pm enable --user 0 $maps_pkg"); quietMaps() }
         rule.waitUntil(8_000) { ShortcutLauncher(ctx).resolve(maps) }
         rule.onNode(line("Route")).performClick()
         rule.waitUntil(8_000) { o.answers.size == 2 }; o.answers.toList() shouldBe listOf(false, true) // an immediate retry works, and the note went
         rule.onAllNodes(failure).assertCountEquals(0)
-        shell("input keyevent KEYCODE_HOME")
+        closeMaps()
     }
 
     /** Recreate the real Activity, then build Home again over a FRESH store instance that reads the persisted prefs. */
@@ -361,12 +370,13 @@ class HomeShortcutsTest {
     @Test fun linkTargetSurvivesRestartAndOpens() {
         val maps = Target.Link(LinkTemplate.MAPS_ROUTE, "Home")
         check(ShortcutLauncher(ctx).resolve(maps)) { "Maps must be on the test device" }
+        quietMaps()
         val o = real(); keepTarget("Route", maps); showWith(o); waitFor(line("Route"))
         val o2 = real(); recreateWith(o2, agent()); waitFor(line("Route"))
         ShortcutStore(ctx).all().single().target shouldBe maps
         rule.onNode(line("Route")).performClick()
         rule.waitUntil(8_000) { o2.answers.isNotEmpty() }; o2.answers.toList() shouldBe listOf(true); o.asked.size shouldBe 0
-        shell("input keyevent KEYCODE_HOME")
+        closeMaps()
     }
 
     @Test fun targetSurvivesRestart() {

@@ -105,7 +105,7 @@ internal class HomeMenuState(private val home: SheetHome, private val scope: Cor
 
     private fun draft(title: String, target: Target) = Shortcut(UUID.randomUUID().toString(), title.take(Shortcut.MAX_TITLE), null, null, target, createdAt = home.now())
 
-    private fun attempt(p: Pending, replacing: String?, retried: Boolean = false) {
+    private fun attempt(p: Pending, replacing: String?) {
         scope.launch {
             message = null; added = false
             val result = try { withContext(Dispatchers.IO) { home.keeper.keep(p.shortcut, replacing, p.validate) } }
@@ -116,8 +116,8 @@ internal class HomeMenuState(private val home: SheetHome, private val scope: Cor
                 KeepResult.Duplicate -> picking = null
                 KeepResult.TargetChanged -> { picking = null; shortcuts = withContext(Dispatchers.IO) { home.publishedFor(pkg) } }
                 // Home filled meanwhile (Full) or the line to replace is gone (Stale): the picker is rebuilt from what is kept now.
-                // If there is room after all, the tap's own intent (keep it) is simply carried out.
-                KeepResult.Full, KeepResult.StaleReplacement -> if (!isFull(kept) && !retried) attempt(p, null, retried = true) else picking = p
+                // Nothing is written on its own: if Home has room now, the fresh menu simply offers "+ Home" again and the user taps.
+                KeepResult.Full, KeepResult.StaleReplacement -> picking = if (isFull(kept)) p else null
             }
         }
     }
@@ -133,7 +133,7 @@ internal class HomeMenuState(private val home: SheetHome, private val scope: Cor
 @Composable
 internal fun SplitMenuRow(label: String, onHome: Boolean, onOpen: () -> Unit, onToggle: () -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.weight(1f).heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onOpen)
+        Box(Modifier.weight(1f).widthIn(min = 48.dp).heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onOpen)
             .semantics { contentDescription = "Open $label" }.padding(horizontal = 16.dp, vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
             Text(label, style = ST.step.copy(fontSize = 16.sp), color = M.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -164,7 +164,7 @@ internal fun ColumnScope.HomePicker(menu: HomeMenuState) {
     MenuItem("Cancel", secondary = true) { menu.cancel() }
 }
 
-/** The inline failure and the polite "Added to Home" (no toast; the row's flip is the visible confirmation). */
+/** The inline failure and the polite "Added to Home" (no toast; the row's flip is the visible confirmation). Lives in the popup's footer, outside the scrolling rows, so a tall menu never clips it out of the accessibility tree. */
 @Composable
 internal fun ColumnScope.HomeMenuStatus(menu: HomeMenuState) {
     menu.message?.let { Text(it, style = ST.step.copy(fontSize = 14.sp), color = M.text2,

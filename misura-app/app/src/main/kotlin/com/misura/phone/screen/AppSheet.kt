@@ -285,9 +285,10 @@ fun launchSheetEntry(context: Context, state: AppSheetState, entry: SheetEntry, 
 private fun AppMenu(entry: SheetEntry, shortcuts: List<MenuShortcut>, pinned: Boolean, home: SheetHome?, keptAtOpen: List<com.misura.core.shortcut.Shortcut>,
     onDismiss: () -> Unit, onShortcut: (MenuShortcut) -> Unit, onPin: () -> Unit) {
     val context = LocalContext.current
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    // Pinned to Main: after the IO work the state writes must never resume on the IO thread (the compose test interceptor would let them).
+    val scope = androidx.compose.runtime.rememberCoroutineScope { kotlinx.coroutines.Dispatchers.Main }
     val menu = remember(home, entry.key) { home?.let { HomeMenuState(it, scope, entry.pkg, entry.name, shortcuts, keptAtOpen) } }
-    MenuPopup(onDismiss) {
+    MenuPopup(onDismiss, footer = menu?.let { m -> { HomeMenuStatus(m) } }) {
         if (menu?.picking != null) HomePicker(menu)
         else {
             val list = menu?.shortcuts ?: shortcuts
@@ -313,13 +314,13 @@ private fun AppMenu(entry: SheetEntry, shortcuts: List<MenuShortcut>, pinned: Bo
                 onDismiss()
             }
         }
-        menu?.let { HomeMenuStatus(it) }
     }
 }
 
 /** The menu's popup: above its anchor, one rounded surface (the app menu's look); Home's line menu reuses it. */
 @Composable
-internal fun MenuPopup(onDismiss: () -> Unit, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+internal fun MenuPopup(onDismiss: () -> Unit, footer: (@Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit)? = null,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
     val margin = with(LocalDensity.current) { 16.dp.roundToPx() }
     val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
     val position = remember(margin, gap) { object : PopupPositionProvider {
@@ -331,7 +332,11 @@ internal fun MenuPopup(onDismiss: () -> Unit, content: @Composable androidx.comp
     Popup(popupPositionProvider = position, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
         Column(Modifier.width((LocalConfiguration.current.screenWidthDp.dp - 88.dp).coerceAtLeast(160.dp))
             .heightIn(max = 360.dp).shadow(18.dp, RoundedCornerShape(14.dp)).background(M.surface, RoundedCornerShape(14.dp))
-            .verticalScroll(scroll).padding(vertical = 6.dp), content = content)
+            .padding(vertical = 6.dp)) {
+            // Rows scroll; the footer (status) stays outside them, so it is never clipped out of the accessibility tree.
+            Column(Modifier.weight(1f, fill = false).verticalScroll(scroll), content = content)
+            footer?.invoke(this)
+        }
     }
 }
 

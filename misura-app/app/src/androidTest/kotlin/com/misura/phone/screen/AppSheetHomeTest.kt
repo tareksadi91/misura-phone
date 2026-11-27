@@ -3,6 +3,8 @@ package com.misura.phone.screen
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -177,6 +179,35 @@ class AppSheetHomeTest {
         waitFor(full)
         count(notHomeLine("Two")) shouldBe 0
         store.all().map { it.title }.toSet() shouldBe setOf("One", "Three", "Four")
+    }
+
+    @Test fun staleReplacementWithRoomWritesNothing() {
+        fill(); show(); openMenu()
+        click(add); waitFor(full)
+        store.remove("id-Two") // the chosen line disappears and nothing fills its slot: Home has room now
+        click(notHomeLine("Two"))
+        waitFor(add) // the fresh menu offers + Home again; the user taps
+        count(full) shouldBe 0
+        store.all().map { it.title } shouldBe listOf("One", "Three") // nothing was written on its own
+        pins.of(pkg) shouldBe emptySet()
+    }
+
+    private fun tallMenu() { targets.shortcuts = List(6) { ShortcutLauncher.Published(if (it == 0) "a" else "s$it", if (it == 0) "Check in" else "Class $it", true) } }
+
+    @Test fun tallMenuStillAnnouncesAddedToHome() {
+        tallMenu(); show(); openMenu()
+        rule.onNode(hasText("App info")).assertIsNotDisplayed() // the menu really is taller than its scroll area
+        click(add); waitFor(remove)
+        waitFor(hasContentDescription("Added to Home"))
+        rule.onNode(hasContentDescription("Added to Home")).assertIsDisplayed() // not clipped out of the accessibility tree
+    }
+
+    @Test fun tallMenuStillShowsStorageFailure() {
+        tallMenu(); show(); openMenu()
+        prefs().edit().putString("all", "{not a list").commit()
+        click(add)
+        waitFor(hasText("Not done: Misura couldn't save progress."))
+        rule.onNode(hasText("Not done: Misura couldn't save progress.")).assertIsDisplayed()
     }
 
     @Test fun cancelKeepsAll() {

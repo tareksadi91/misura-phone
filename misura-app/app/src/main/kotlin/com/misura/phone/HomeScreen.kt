@@ -833,24 +833,32 @@ private fun Home(rows: List<Row>, now: Long, modifier: Modifier, shortcuts: List
     val cueHeight = maxOf(14.u, heightOf("Swipe down for apps", ST.date,
         width = (contentWidth - with(density) { 22.u.roundToPx() }).coerceAtLeast(1)))
     // A kept shortcut is a line too: the clock and date give way before the only line does.
-    // The inline failure under a shortcut line takes its own height out of the fit, so it never pushes a line or Earlier off the screen.
-    val noteHeight = if (note != null && shortcuts.any { it.id == note.first }) heightOf(note.second, ST.step) else 0.dp
-    val tail = earlierReserve + noteHeight + if (open.isEmpty() && shortcuts.isEmpty()) cueHeight else rowHeight
     val dateHeight = heightOf(date, ST.date)
     val clockHeight = 24.u + heightOf(time, ST.clock)
-    val showDate = dateHeight + tail <= maxHeight
-    val showClock = clockHeight + dateHeight + tail <= maxHeight
-    val header = (if (showDate) dateHeight else 0.dp) + (if (showClock) clockHeight else 0.dp)
-    // Reserve Earlier before fitting task lines; no extra home scroll competes with the accepted sheet drag.
-    val slots = ((maxHeight - header - earlierReserve - noteHeight).value / rowHeight.value).toInt().coerceAtLeast(0)
-    // At most four lines, tasks first (yours, failed, running), then shortcuts in the order they were kept (spec Home 5).
-    val fit = com.misura.core.shortcut.homeFit(yoursAll.size, failedAll.size, running.size, shortcuts.size, slots)
+    class Layout(val showDate: Boolean, val showClock: Boolean, val header: androidx.compose.ui.unit.Dp, val fit: com.misura.core.shortcut.HomeFit)
+    // The header and the visible lines are worked out together; [noteH] is the height of an inline failure that is charged to the fit.
+    fun layout(noteH: androidx.compose.ui.unit.Dp): Layout {
+        val tail = earlierReserve + noteH + if (open.isEmpty() && shortcuts.isEmpty()) cueHeight else rowHeight
+        val showDate = dateHeight + tail <= maxHeight
+        val showClock = clockHeight + dateHeight + tail <= maxHeight
+        val header = (if (showDate) dateHeight else 0.dp) + (if (showClock) clockHeight else 0.dp)
+        // Reserve Earlier before fitting task lines; no extra home scroll competes with the accepted sheet drag.
+        val slots = ((maxHeight - header - earlierReserve - noteH).value / rowHeight.value).toInt().coerceAtLeast(0)
+        // At most four lines, tasks first (yours, failed, running), then shortcuts in the order they were kept (spec Home 5).
+        return Layout(showDate, showClock, header, com.misura.core.shortcut.homeFit(yoursAll.size, failedAll.size, running.size, shortcuts.size, slots))
+    }
+    // The inline failure under a shortcut line takes its own height out of the fit, but only when that line is actually rendered with it
+    // (clock and date yield first); when no shortcut place is left, the note is not shown and costs no task its line.
+    val noted = note?.let { n -> shortcuts.firstOrNull { it.id == n.first } }
+    val withNote = noted?.let { layout(heightOf(note.second, ST.step)) }?.takeIf { it.fit.shortcuts > 0 }
+    val noteShown = withNote != null
+    val lay = withNote ?: layout(0.dp)
+    val showDate = lay.showDate; val showClock = lay.showClock; val header = lay.header; val fit = lay.fit
     val yours = yoursAll.take(fit.yours)
     val failed = failedAll.take(fit.failed)
     val showRunning = fit.running
     // The line that shows the failure stays on screen: it takes the last shortcut place when the fit would have dropped it.
-    val noted = note?.let { n -> shortcuts.firstOrNull { it.id == n.first } }
-    val shownShortcuts = shortcuts.take(fit.shortcuts).let { l -> if (noted != null && fit.shortcuts > 0 && noted !in l) l.dropLast(1) + noted else l }
+    val shownShortcuts = shortcuts.take(fit.shortcuts).let { l -> if (noteShown && noted !in l) l.dropLast(1) + noted!! else l }
     val hidden = allOpen - yours.size - failed.size - if (showRunning) running.size else 0
     val headlineFits = open.isEmpty() && shortcuts.isEmpty() && maxHeight - header - earlierReserve >= heightOf("What should we do?", ST.home) + 24.u + cueHeight
     Column(Modifier.fillMaxSize().padding(horizontal = M.gutter - M.m)) {
@@ -879,7 +887,7 @@ private fun Home(rows: List<Row>, now: Long, modifier: Modifier, shortcuts: List
                         }
                     }
                 }
-                note?.takeIf { it.first == sc.id }?.let { Text(it.second, style = ST.step, color = M.text2, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+                note?.takeIf { noteShown && it.first == sc.id }?.let { Text(it.second, style = ST.step, color = M.text2, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
             } } }
             if (rows.isNotEmpty()) Text(if (hidden > 0) "Earlier · $hidden still open ›" else EARLIER, style = ST.nav, color = if (hidden > 0) M.text else M.text2,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClickLabel = "Earlier tasks", onClick = onEarlier).padding(vertical = 16.dp))

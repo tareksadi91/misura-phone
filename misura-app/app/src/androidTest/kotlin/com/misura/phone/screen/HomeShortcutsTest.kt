@@ -337,13 +337,13 @@ class HomeShortcutsTest {
         val maps = Target.Link(LinkTemplate.MAPS_ROUTE, "Home"); val maps_pkg = "com.google.android.apps.maps"
         check(ShortcutLauncher(ctx).resolve(maps)) { "Maps must be on the test device" }
         val o = real(); keepTarget("Route", maps); showWith(o); waitFor(line("Route"))
-        shell("pm disable-user --user 0 $maps_pkg")
         try {
+            shell("pm disable-user --user 0 $maps_pkg")
             check(!ShortcutLauncher(ctx).resolve(maps)) { "Maps still resolves after disabling it" }
             rule.onNode(line("Route")).performClick()
             waitFor(failure); o.answers.toList() shouldBe listOf(false)
             rule.onAllNodes(line("Route")).assertCountEquals(1)
-        } finally { shell("pm enable $maps_pkg") }
+        } finally { shell("pm enable --user 0 $maps_pkg") }
         rule.waitUntil(8_000) { ShortcutLauncher(ctx).resolve(maps) }
         rule.onNode(line("Route")).performClick()
         rule.waitUntil(8_000) { o.answers.size == 2 }; o.answers.toList() shouldBe listOf(false, true) // an immediate retry works, and the note went
@@ -410,6 +410,32 @@ class HomeShortcutsTest {
         check(earlier.bottom <= root.bottom + 1f) { "Earlier $earlier off screen $root" }
         check(note.bottom <= earlier.top + 1f) { "note $note overlaps Earlier $earlier" }
         rule.onAllNodes(line("One")).assertCountEquals(1)
+    }
+
+    /** With no shortcut place left, a failure note is not shown and must not cost a task its line (the note-free Home is the reference, after a restart). */
+    @Test fun noPhantomNoteHidesATask() {
+        repeat(3) { ready("y$it") }; keepTarget("One", Target.App("com.example.nothere1"))
+        var h by mutableStateOf(900.dp)
+        val taskLine = hasContentDescription(", ready for your go", substring = true)
+        val o = fake(false); val a = agent()
+        rule.setContent { Box(Modifier.fillMaxWidth().height(h)) { HomeScreen(a, sessions, null, null, shortcutStore = store, openTarget = o.open) } }
+        waitFor(line("One")); waitFor(taskLine, 3)
+        rule.onNode(line("One")).performClick(); waitFor(failure)
+        val heights = (900 downTo 200 step 8).map { it.dp }
+        val withNote = heights.associateWith { d -> h = d; rule.waitForIdle(); Triple(count(taskLine), count(shortcutLine), count(failure)) }
+        // Same sweep after a real restart: no note yet, same tasks, same shortcut.
+        rule.activityRule.scenario.recreate()
+        val fresh = ShortcutStore(ctx); h = 900.dp
+        rule.runOnUiThread { rule.activity.setContent { Box(Modifier.fillMaxWidth().height(h)) { HomeScreen(a, sessions, null, null, shortcutStore = fresh, openTarget = o.open) } } }
+        waitFor(line("One")); waitFor(taskLine, 3)
+        val plain = heights.associateWith { d -> h = d; rule.waitForIdle(); count(taskLine) }
+        var checked = 0
+        for (d in heights) {
+            val (tasks, shortcut, note) = withNote.getValue(d)
+            check(note <= shortcut) { "at $d: note shown $note without its line ($shortcut)" } // never a note without its line (tasks outrank the note when there is no room for both)
+            if (shortcut == 0) { checked++; check(tasks == plain.getValue(d)) { "at $d a phantom note hid a task: $tasks of ${plain.getValue(d)}" } }
+        }
+        check(checked > 0) { "no height left the shortcut without a place" }
     }
 
     @Test fun longPressRemoves() {

@@ -95,8 +95,11 @@ class ShortcutTool(
         val shownApp = appLabel(app) // read once: the digest and the card bind the same words
         val r = gate.act("keep", draft.digest(null, shownApp, null), session) {
             try {
-                if (store.keep(draft.copy(id = UUID.randomUUID().toString(), createdAt = clock()), null)) "Kept: $title"
-                else "Not kept: Home changed, ask again"
+                when (store.keep(draft.copy(id = UUID.randomUUID().toString(), createdAt = clock()), null)) {
+                    KeepResult.Kept -> "Kept: $title"
+                    KeepResult.Duplicate -> "Not kept: it is already on Home"
+                    KeepResult.Full, KeepResult.StaleReplacement, KeepResult.TargetChanged -> "Not kept: Home changed, ask again"
+                }
             } catch (_: StorageUnavailableException) { STORAGE }
         }
         val line = "“$prompt”"

@@ -2,11 +2,16 @@ package com.misura.phone.shortcut
 
 import android.content.Context
 import com.misura.core.shortcut.Shortcut
+import com.misura.core.shortcut.Target
+import com.misura.core.shortcut.key
 import com.misura.phone.store.StorageUnavailableException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+
+/** What [ShortcutStore.keep] did. [TargetChanged] is never produced by the store: the keeper (Task 2b) returns it when its validate callback finds the target no longer resolves as shown. */
+enum class KeepResult { Kept, TargetChanged, Duplicate, Full, StaleReplacement }
 
 /**
  * Kept Home shortcuts, one JSON list in private preferences. Synchronous like RoutineStore: the tap gate runs its action
@@ -34,13 +39,23 @@ class ShortcutStore(ctx: Context) {
 
     fun all(): List<Shortcut> = locked { read().orEmpty() }
 
-    /** Adds [s]. At [Shortcut.MAX] it needs [replacing], an id still stored, which it removes. False if the cap is hit without one, or [replacing] is no longer stored. */
-    fun keep(s: Shortcut, replacing: String?): Boolean = locked {
+    /** The kept shortcut whose DIRECT target equals [target] (same [key]); prompt-only shortcuts never match, whatever app they used. */
+    fun keptFor(target: Target): Shortcut? = locked { read().orEmpty().firstOrNull { it.target?.key() == target.key() } }
+
+    /**
+     * Adds [s]. [replacing] is the id of the kept shortcut the user chose to replace; it is removed in the same write.
+     * [KeepResult.StaleReplacement] if that id is no longer stored; [KeepResult.Duplicate] if another kept shortcut has the same direct
+     * target (prompt-only never match); [KeepResult.Full] at [Shortcut.MAX] with nothing to replace. Nothing is written unless [KeepResult.Kept].
+     */
+    fun keep(s: Shortcut, replacing: String?): KeepResult = locked {
         val l = writable()
-        if (replacing != null && l.none { it.id == replacing }) return@locked false
-        if (l.size >= Shortcut.MAX && replacing == null) return@locked false
-        write(l.filterNot { it.id == replacing } + s)
-        true
+        if (replacing != null && l.none { it.id == replacing }) return@locked KeepResult.StaleReplacement
+        val rest = l.filterNot { it.id == replacing }
+        val key = s.target?.key()
+        if (key != null && rest.any { it.target?.key() == key }) return@locked KeepResult.Duplicate
+        if (replacing == null && l.size >= Shortcut.MAX) return@locked KeepResult.Full
+        write(rest + s)
+        KeepResult.Kept
     }
 
     fun remove(id: String): Boolean = locked {

@@ -130,7 +130,7 @@ class HomeShortcutsTest {
 
     private val prompt = "check in at the sports-club app"
     private fun keep(title: String, p: String = "prompt for $title", app: String? = null) =
-        check(store.keep(Shortcut("id-$title", title, p, app, createdAt = System.currentTimeMillis()), null)) { "store full" }
+        check(store.keep(Shortcut("id-$title", title, p, app, createdAt = System.currentTimeMillis()), null) == com.misura.phone.shortcut.KeepResult.Kept) { "store full" }
     private suspend fun seed(id: String, say: Say?, status: SessionStatus = SessionStatus.IDLE): Session {
         val s = Session(id, status, 0, System.currentTimeMillis(), say = say)
         sessions.save(s)

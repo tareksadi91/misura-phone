@@ -837,20 +837,25 @@ private fun Home(rows: List<Row>, now: Long, modifier: Modifier, shortcuts: List
     val clockHeight = 24.u + heightOf(time, ST.clock)
     class Layout(val showDate: Boolean, val showClock: Boolean, val header: androidx.compose.ui.unit.Dp, val fit: com.misura.core.shortcut.HomeFit)
     // The header and the visible lines are worked out together; [noteH] is the height of an inline failure that is charged to the fit.
-    fun layout(noteH: androidx.compose.ui.unit.Dp): Layout {
-        val tail = earlierReserve + noteH + if (open.isEmpty() && shortcuts.isEmpty()) cueHeight else rowHeight
-        val showDate = dateHeight + tail <= maxHeight
-        val showClock = clockHeight + dateHeight + tail <= maxHeight
+    fun layoutOf(noteH: androidx.compose.ui.unit.Dp, showDate: Boolean, showClock: Boolean): Layout {
         val header = (if (showDate) dateHeight else 0.dp) + (if (showClock) clockHeight else 0.dp)
         // Reserve Earlier before fitting task lines; no extra home scroll competes with the accepted sheet drag.
         val slots = ((maxHeight - header - earlierReserve - noteH).value / rowHeight.value).toInt().coerceAtLeast(0)
         // At most four lines, tasks first (yours, failed, running), then shortcuts in the order they were kept (spec Home 5).
         return Layout(showDate, showClock, header, com.misura.core.shortcut.homeFit(yoursAll.size, failedAll.size, running.size, shortcuts.size, slots))
     }
-    // The inline failure under a shortcut line takes its own height out of the fit, but only when that line is actually rendered with it
-    // (clock and date yield first); when no shortcut place is left, the note is not shown and costs no task its line.
+    fun layout(noteH: androidx.compose.ui.unit.Dp): Layout {
+        val tail = earlierReserve + noteH + if (open.isEmpty() && shortcuts.isEmpty()) cueHeight else rowHeight
+        return layoutOf(noteH, dateHeight + tail <= maxHeight, clockHeight + dateHeight + tail <= maxHeight)
+    }
+    // The inline failure under a shortcut line takes its own height out of the fit. The clock and date yield first (both, then the clock
+    // only, then neither) until the line, its note and every task fit; if even that cannot, the failed line is not shown at all:
+    // a line is never shown without its note, and no task loses its place to a note.
     val noted = note?.let { n -> shortcuts.firstOrNull { it.id == n.first } }
-    val withNote = noted?.let { layout(heightOf(note.second, ST.step)) }?.takeIf { it.fit.shortcuts > 0 }
+    val withNote = noted?.let {
+        val h = heightOf(note.second, ST.step); val base = layout(h)
+        listOf(base, layoutOf(h, base.showDate, false), layoutOf(h, false, false)).firstOrNull { it.fit.shortcuts > 0 }
+    }
     val noteShown = withNote != null
     val lay = withNote ?: layout(0.dp)
     val showDate = lay.showDate; val showClock = lay.showClock; val header = lay.header; val fit = lay.fit
@@ -858,7 +863,8 @@ private fun Home(rows: List<Row>, now: Long, modifier: Modifier, shortcuts: List
     val failed = failedAll.take(fit.failed)
     val showRunning = fit.running
     // The line that shows the failure stays on screen: it takes the last shortcut place when the fit would have dropped it.
-    val shownShortcuts = shortcuts.take(fit.shortcuts).let { l -> if (noteShown && noted !in l) l.dropLast(1) + noted!! else l }
+    val shownShortcuts = if (noted == null || noteShown) shortcuts.take(fit.shortcuts).let { l -> if (noteShown && noted !in l) l.dropLast(1) + noted!! else l }
+        else shortcuts.filter { it !== noted }.take(fit.shortcuts)
     val hidden = allOpen - yours.size - failed.size - if (showRunning) running.size else 0
     val headlineFits = open.isEmpty() && shortcuts.isEmpty() && maxHeight - header - earlierReserve >= heightOf("What should we do?", ST.home) + 24.u + cueHeight
     Column(Modifier.fillMaxSize().padding(horizontal = M.gutter - M.m)) {

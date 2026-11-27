@@ -432,10 +432,12 @@ class HomeShortcutsTest {
         var checked = 0
         for (d in heights) {
             val (tasks, shortcut, note) = withNote.getValue(d)
-            check(note <= shortcut) { "at $d: note shown $note without its line ($shortcut)" } // never a note without its line (tasks outrank the note when there is no room for both)
-            if (shortcut == 0) { checked++; check(tasks == plain.getValue(d)) { "at $d a phantom note hid a task: $tasks of ${plain.getValue(d)}" } }
+            check(note == shortcut) { "at $d: note shown $note, failed line shown $shortcut" } // a line never shows without its note, nor a note without its line
+            check(tasks >= plain.getValue(d)) { "at $d a note hid a task: $tasks of ${plain.getValue(d)}" }
+            if (shortcut == 0) checked++
         }
         check(checked > 0) { "no height left the shortcut without a place" }
+        check(heights.any { withNote.getValue(it).second == 1 && plain.getValue(it) == 3 }) { "no height shows tasks, the line and its note together" }
     }
 
     @Test fun longPressRemoves() {

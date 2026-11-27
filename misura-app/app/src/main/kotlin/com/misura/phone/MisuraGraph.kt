@@ -56,12 +56,15 @@ object MisuraGraph {
     /** Open an app: a screen parked on it comes to the main screen instead of the app being launched again (see UseApp.bringParked). */
     @Volatile var bringParked: suspend (String) -> Boolean = { false }
 
+    /** Starts an app's launch screen for [openTarget]; a seam so a test can make the launch fail. */
+    @Volatile internal var appOpener: (Context, String) -> Boolean = { c, p -> com.misura.phone.hands.openApp(c, p) }
+
     /**
      * Opens a shortcut's direct target for the user (Home tap, app sheet): the parked-screen handoff first, then the destination. Never touches the
      * approval gate or the controller, so opening cannot consume or answer a pending approval. False = it did not open.
      */
     suspend fun openTarget(ctx: Context, target: com.misura.core.shortcut.Target): Boolean =
-        com.misura.phone.shortcut.ShortcutLauncher(ctx).open(target) { bringParked(it) }
+        com.misura.phone.shortcut.ShortcutLauncher(ctx, openApp = appOpener).open(target) { bringParked(it) }
 
     /** Resolves the handler first and pins it, so a protected app is never the one that opens; Android's chooser is left to the owner. */
     internal fun openDirections(app: Context, url: String) {

@@ -90,16 +90,39 @@ class ShortcutLauncherTest {
         launcher.open(Target.Settings(SettingsPage.WIFI)) { parked += it; false } shouldBe true
         parked.size shouldBe 1 // handoff asked for the handler's package first
         shell("input keyevent KEYCODE_HOME")
-        val none = ShortcutLauncher(ctx) { "com.misura.test.NO_SUCH_SETTINGS" }
+        val none = ShortcutLauncher(ctx, actions = { "com.misura.test.NO_SUCH_SETTINGS" })
         none.resolve(Target.Settings(SettingsPage.WIFI)) shouldBe false
         parked.clear()
         none.open(Target.Settings(SettingsPage.WIFI)) { parked += it; false } shouldBe false
         parked shouldBe emptyList()
     }
 
+    /** Spotify is absent, a decoy handles `spotify:`: the link must be refused, not handed to the decoy (red when setPackage is dropped). */
     @Test fun linkIsPackageScopedAndFailsClosed(): Unit = runBlocking {
-        launcher.open(Target.Link(LinkTemplate.MAPS_ROUTE, "Nowhere"), noPark) shouldBe false // param fails the template
-        launcher.open(Target.Link(LinkTemplate.SPOTIFY_PAGE, "playlist:" + "a".repeat(22)), noPark) shouldBe launcher.resolve(Target.Link(LinkTemplate.SPOTIFY_PAGE, "playlist:" + "a".repeat(22)))
+        val spotify = Target.Link(LinkTemplate.SPOTIFY_PAGE, "playlist:" + "a".repeat(22))
+        check(ctx.packageManager.getLaunchIntentForPackage("com.spotify.music") == null) { "Spotify must be absent on the test device" }
+        shell("run-as $PKG rm -f files/decoy.txt")
+        val i = launcher.linkIntent(spotify)!!
+        i.`package` shouldBe "com.spotify.music"
+        i.dataString shouldBe "spotify:playlist:" + "a".repeat(22)
+        launcher.linkIntent(Target.Link(LinkTemplate.MAPS_ROUTE, "Home"))!!.also {
+            it.`package` shouldBe "com.google.android.apps.maps"; it.dataString shouldBe "https://www.google.com/maps/dir/?api=1&destination=Home" }
+        launcher.linkIntent(Target.Link(LinkTemplate.MAPS_ROUTE, "Nowhere")) shouldBe null
+        MisuraGraph.openTarget(ctx, spotify) shouldBe false
+        MisuraGraph.openTarget(ctx, Target.Link(LinkTemplate.MAPS_ROUTE, "Nowhere")) shouldBe false
+        delay(1_000)
+        shell("run-as $PKG cat files/decoy.txt").trim() shouldBe ""
+    }
+
+    /** A launch that throws (uninstall/disable race) is a refusal through the production opener, not an exception at the caller. */
+    @Test fun throwingAppLaunchIsRefusedThroughOpenTarget(): Unit = runBlocking {
+        val prior = MisuraGraph.appOpener
+        try {
+            MisuraGraph.appOpener = { _, _ -> throw android.content.ActivityNotFoundException("gone") }
+            MisuraGraph.openTarget(ctx, Target.App(PKG)) shouldBe false
+            MisuraGraph.appOpener = { _, _ -> throw SecurityException("no") }
+            MisuraGraph.openTarget(ctx, Target.App(PKG)) shouldBe false
+        } finally { MisuraGraph.appOpener = prior }
     }
 
     /** The app sheet's shortcut launch goes through openTarget: the parked-screen handoff is asked for first (fails on source that calls LauncherApps directly). */

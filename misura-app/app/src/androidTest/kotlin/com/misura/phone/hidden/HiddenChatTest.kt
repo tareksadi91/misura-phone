@@ -985,6 +985,24 @@ class HiddenChatTest {
         shell("am force-stop $TEST_PKG")
     }
 
+    /** A shortcut that is gone is refused before the handoff: the parked screen stays held, not moved to the main display. */
+    @Test fun missingShortcutLeavesTheParkedScreenHeld(): Unit = runBlocking {
+        seedChat()
+        shell("am broadcast --include-stopped-packages -a com.misura.testapp.SHORTCUTS -p $TEST_PKG --es op publish")
+        val hand = parkHand(openFriend, typeText("hello there"), tapSend)
+        askId(hand.run(parkGoal("send hello there to FriendB")))
+        hand.parkedSession.shouldNotBeNull()
+        val prior = com.misura.phone.MisuraGraph.bringParked
+        com.misura.phone.MisuraGraph.bringParked = hand::bringParked
+        try {
+            com.misura.phone.MisuraGraph.openTarget(ctx, com.misura.core.shortcut.Target.AppShortcut(TEST_PKG, "fx_none")) shouldBe false
+        } finally { com.misura.phone.MisuraGraph.bringParked = prior }
+        hand.parkedSession.shouldNotBeNull()
+        screen.taskDisplayOf(TEST_PKG) shouldNotBe 0
+        shell("am broadcast --include-stopped-packages -a com.misura.testapp.SHORTCUTS -p $TEST_PKG --es op remove")
+        shell("am force-stop $TEST_PKG")
+    }
+
     // ---- Protected apps (SYSTEM §5 M1). The owner's switch is seeded as raw preferences, so these run unchanged on the prior source. ----
     private val access get() = ctx.getSharedPreferences("app_access", android.content.Context.MODE_PRIVATE)
     private fun block(pkg: String = TEST_PKG) = check(access.edit().putBoolean(pkg, false).commit())

@@ -31,7 +31,11 @@ fun settingsAction(page: SettingsPage): String = when (page) {
  * the Home app); starting an already pinned shortcut is attempted regardless (Android exempts pinned ones).
  * [actions] is the page-to-action table (a seam for tests; production is [settingsAction]).
  */
-class ShortcutLauncher(private val ctx: Context, private val actions: (SettingsPage) -> String = ::settingsAction) : ShortcutPins {
+class ShortcutLauncher(
+    private val ctx: Context,
+    private val actions: (SettingsPage) -> String = ::settingsAction,
+    private val openApp: (Context, String) -> Boolean = { c, p -> com.misura.phone.hands.openApp(c, p) },
+) : ShortcutPins {
     /** A shortcut an app publishes, as the user would be shown it: [label] is single-line and capped. */
     data class Published(val id: String, val label: String, val enabled: Boolean)
 
@@ -65,7 +69,7 @@ class ShortcutLauncher(private val ctx: Context, private val actions: (SettingsP
     }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
     /** Package-scoped VIEW of the template's URI; null when the param fails the template. Never unscoped. */
-    private fun linkIntent(t: Target.Link): Intent? {
+    internal fun linkIntent(t: Target.Link): Intent? {
         val uri = t.template.uri(t.param) ?: return null
         val pkg = t.pkg ?: return null
         return Intent(Intent.ACTION_VIEW, Uri.parse(uri)).setPackage(pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -87,17 +91,26 @@ class ShortcutLauncher(private val ctx: Context, private val actions: (SettingsP
      * the destination is launched after the handoff (the parked app lands where the hand left off, then the deep screen opens on the real display).
      * Opening never touches a pending approval: no gate and no controller are involved. False = it did not open (never retried elsewhere).
      */
-    suspend fun open(target: Target, bringParked: suspend (String) -> Boolean): Boolean = when (target) {
+    suspend fun open(target: Target, bringParked: suspend (String) -> Boolean): Boolean = try {
+        openUnguarded(target, bringParked)
+    } catch (_: ActivityNotFoundException) { false } catch (_: SecurityException) { false } // an uninstall/disable race anywhere in the launch: refused, never thrown at the caller
+
+    private suspend fun openUnguarded(target: Target, bringParked: suspend (String) -> Boolean): Boolean = when (target) {
         is Target.App ->
             if (bringParked(target.pkg)) { com.misura.phone.store.Pins(ctx).launched(target.pkg); true }
-            else com.misura.phone.hands.openApp(ctx, target.pkg)
+            else openApp(ctx, target.pkg)
         is Target.AppShortcut -> {
-            bringParked(target.pkg)
-            val ok = try {
-                checkNotNull(launcher).startShortcut(target.pkg, target.id, null, null, me); true
-            } catch (_: Exception) { false } // gone, disabled, uninstalled, no longer allowed
-            if (ok) com.misura.phone.store.Pins(ctx).launched(target.pkg)
-            ok
+            // Refused before the handoff only when an authorized, successful query proves it missing or disabled; no permission or a failed query still attempts the launch (pinned ones work without it).
+            val known = host()?.let { l -> query(l, target.pkg, ALL, listOf(target.id)) }
+            if (known != null && known.none { it.id == target.id && it.isEnabled }) false
+            else {
+                bringParked(target.pkg)
+                val ok = try {
+                    checkNotNull(launcher).startShortcut(target.pkg, target.id, null, null, me); true
+                } catch (_: Exception) { false } // gone, disabled, uninstalled, no longer allowed
+                if (ok) com.misura.phone.store.Pins(ctx).launched(target.pkg)
+                ok
+            }
         }
         is Target.Settings -> start(settingsIntent(target), bringParked)
         is Target.Link -> linkIntent(target)?.let { start(it, bringParked) } ?: false
@@ -106,7 +119,7 @@ class ShortcutLauncher(private val ctx: Context, private val actions: (SettingsP
     private suspend fun start(i: Intent, bringParked: suspend (String) -> Boolean): Boolean {
         val handler = handlerPackage(i) ?: return false
         bringParked(handler)
-        return try { ctx.startActivity(i); true } catch (_: ActivityNotFoundException) { false } catch (_: SecurityException) { false }
+        ctx.startActivity(i); return true
     }
 
     private companion object {

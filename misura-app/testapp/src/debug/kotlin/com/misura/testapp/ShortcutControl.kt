@@ -34,3 +34,11 @@ class FixtureTargetActivity : Activity() {
         File(filesDir, "opened.txt").writeText("opened=${intent.getStringExtra("id")}")
     }
 }
+
+/** Handles `spotify:` VIEW as a decoy for the link-scoping test: records `decoy=<uri>` in files/decoy.txt. */
+class DecoyLinkActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        File(filesDir, "decoy.txt").writeText("decoy=${intent.dataString}")
+    }
+}

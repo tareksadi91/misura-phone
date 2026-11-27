@@ -34,14 +34,7 @@ class ChatDrafter(
         fun label(pkg: String) = safeAppLabel(runCatching { appLabel(pkg) }.getOrDefault(""))
         val labels = (installedApps() + (packages + all.map { it.pkg }).distinct().map { label(it) to it })
             .map { (name, pkg) -> safeAppLabel(name) to pkg }
-        fun identity(pkg: String): String {
-            val name = label(pkg)
-            if (name.isBlank() || name == pkg) return pkg
-            val key = labelKey(name)
-            val ambiguous = labels.any { (other, otherPkg) -> otherPkg != pkg &&
-                (labelKey(otherPkg) == key || other.isNotBlank() && (labelKey(other) == key || labelKey("$other ($otherPkg)") == key)) }
-            return if (ambiguous) "$name ($pkg)" else name
-        }
+        fun identity(pkg: String): String = appIdentity(pkg, label(pkg), labels)
         val eligible = all.filter { app == null || it.pkg == app }
         val c = pickChat(to, eligible) ?: return Draft.NoChat(to,
             eligible.sortedByDescending { it.sentAt }.map { "${it.name} (${identity(it.pkg)} = ${it.pkg})" },
@@ -58,7 +51,20 @@ class ChatDrafter(
     override suspend fun discard(taskId: String) { controller.discard(taskId) }
 }
 
-private fun safeAppLabel(label: String) = label.filterNot {
+/**
+ * How an app is named to the user: its sanitized [name] ([safeAppLabel]), with the package added when another app in [labels]
+ * (sanitized label to package) reads the same; a blank name or one equal to the package is the package. Shared with the shortcut card.
+ */
+internal fun appIdentity(pkg: String, name: String, labels: List<Pair<String, String>>): String {
+    if (name.isBlank() || name == pkg) return pkg
+    val key = labelKey(name)
+    val ambiguous = labels.any { (other, otherPkg) -> otherPkg != pkg &&
+        (labelKey(otherPkg) == key || other.isNotBlank() && (labelKey(other) == key || labelKey("$other ($otherPkg)") == key)) }
+    return if (ambiguous) "$name ($pkg)" else name
+}
+
+/** An app-supplied label as text to show: ISO controls, FORMAT characters and line/paragraph separators dropped, trimmed, capped. */
+internal fun safeAppLabel(label: String) = label.filterNot {
     Character.isISOControl(it) || Character.getType(it) in setOf(Character.FORMAT.toInt(), Character.LINE_SEPARATOR.toInt(), Character.PARAGRAPH_SEPARATOR.toInt())
 }.trim().take(80)
 

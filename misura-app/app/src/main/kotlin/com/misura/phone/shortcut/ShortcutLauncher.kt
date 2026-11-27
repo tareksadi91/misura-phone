@@ -25,6 +25,12 @@ fun settingsAction(page: SettingsPage): String = when (page) {
     SettingsPage.APP_DETAILS -> Settings.ACTION_APPLICATION_DETAILS_SETTINGS
 }
 
+/** What the `shortcut` tool reads when it asks and again on the Keep tap ([ShortcutLauncher] in production). */
+interface ShortcutTargets {
+    fun published(pkg: String): List<ShortcutLauncher.Published>
+    fun resolve(target: Target): Boolean
+}
+
 /**
  * Opens a shortcut's direct [Target] and reads the launcher's shortcuts. Every intent is built here from stored, code-validated fields:
  * no `parseUri`, no model-given URIs, no extras, no URI grants. Discovery and pinning need Android's shortcut host permission (Misura as
@@ -35,7 +41,7 @@ class ShortcutLauncher(
     private val ctx: Context,
     private val actions: (SettingsPage) -> String = ::settingsAction,
     private val openApp: (Context, String) -> Boolean = { c, p -> com.misura.phone.hands.openApp(c, p) },
-) : ShortcutPins {
+) : ShortcutPins, ShortcutTargets {
     /** A shortcut an app publishes, as the user would be shown it: [label] is single-line and capped. */
     data class Published(val id: String, val label: String, val enabled: Boolean)
 
@@ -48,7 +54,7 @@ class ShortcutLauncher(
         runCatching { l.getShortcuts(LauncherApps.ShortcutQuery().setPackage(pkg).setQueryFlags(flags).also { q -> ids?.let { q.setShortcutIds(it) } }, me) }.getOrNull()
 
     /** [pkg]'s dynamic, manifest and pinned shortcuts (disabled ones marked), by rank; empty without the host permission or when the query fails. */
-    fun published(pkg: String): List<Published> {
+    override fun published(pkg: String): List<Published> {
         val l = host() ?: return emptyList()
         return query(l, pkg, ALL).orEmpty().distinctBy { it.id }.sortedBy { it.rank }
             .map { Published(it.id, clean(it.shortLabel?.toString() ?: it.id), it.isEnabled) }
@@ -78,7 +84,7 @@ class ShortcutLauncher(
     private fun handlerPackage(i: Intent): String? = ctx.packageManager.resolveActivity(i, 0)?.activityInfo?.packageName
 
     /** True when [target] can open right now: the app has a launch screen, the shortcut still exists and is enabled, the Settings page or link has a handler. */
-    fun resolve(target: Target): Boolean = when (target) {
+    override fun resolve(target: Target): Boolean = when (target) {
         is Target.App -> ctx.packageManager.getLaunchIntentForPackage(target.pkg) != null
         is Target.AppShortcut -> host()?.let { l -> query(l, target.pkg, ALL, listOf(target.id))?.any { it.id == target.id && it.isEnabled } } == true
         is Target.Settings -> handlerPackage(settingsIntent(target)) != null

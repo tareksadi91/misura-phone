@@ -123,9 +123,12 @@ object MisuraGraph {
         val appLabel = { pkg: String -> runCatching { app.packageManager.getApplicationLabel(app.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg) }
         // Steps as Home shows them (a send follows its task), so only a confirmed send counts as a run that worked.
         shortcuts = com.misura.phone.shortcut.ShortcutStore(app)
-        shortcutKeeper = com.misura.phone.shortcut.ShortcutKeeper(shortcuts, pins = com.misura.phone.shortcut.ShortcutLauncher(app))
+        val shortcutLauncher = com.misura.phone.shortcut.ShortcutLauncher(app)
+        shortcutKeeper = com.misura.phone.shortcut.ShortcutKeeper(shortcuts, pins = shortcutLauncher)
+        // A Spotify link counts only from the owner's own words in that conversation (never a tool result stored as "user").
         val shortcutTool = com.misura.phone.shortcut.ShortcutTool(shortcuts, shortcutKeeper,
-            com.misura.phone.shortcut.controllerSteps(sessions, tasks::load, controller::isChecking), appLabel)
+            com.misura.phone.shortcut.controllerSteps(sessions, tasks::load, controller::isChecking), appLabel,
+            targets = shortcutLauncher, ownerWords = { id -> com.misura.core.agent.ownerUtterances(sessions.turns(id)) }, installedApps = { apps })
         val gates = cardGates(calendar, routineTool, shortcutTool, useApp)
         agent = Agent(sessions, ConfiguredBrain, listOf(com.misura.phone.notify.ReadNotifications(app), places, lookup, com.misura.phone.brain.Remember(brainPrefs), useApp, com.misura.phone.hands.OpenApp(app, { apps }) { bringParked(it) }, calendar, com.misura.phone.hands.Contacts(app), com.misura.core.agent.Directions({ url -> openDirections(app, url) }), routineTool, shortcutTool), System::currentTimeMillis, scope, turnTimeoutMs = 300_000, callTimeoutMs = 60_000, // the call after a long app run carries its items and was timing out at 30 s on a slow evening
             turnContext = routes::capture,

@@ -244,7 +244,7 @@ class ShortcutKeeperTest {
     }
     private val noBrain = object : Brain { override suspend fun next(system: String, turns: List<Turn>, tools: List<ToolSpec>): BrainReply = error("not used") }
     private fun toolAgent(vararg replies: () -> BrainReply): Pair<Agent, ShortcutTool> {
-        val tool = ShortcutTool(store, keeper, controllerSteps(sessions, tasks::load) { false }, { it })
+        val tool = ShortcutTool(store, keeper, controllerSteps(sessions, tasks::load) { false }, { it }, ShortcutLauncher(ctx), { emptyList() })
         val routineTool = RoutineTool(RoutineStore(ctx))
         val gates = cardGates(Calendar(ctx, com.misura.core.agent.CalendarGate()), routineTool, tool, UseApp(ShizukuHiddenScreen(ctx), noBrain))
         return Agent(sessions, Script(*replies), listOf(hand, routineTool, tool), System::currentTimeMillis, scope,

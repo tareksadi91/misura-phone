@@ -34,3 +34,11 @@ internal fun ownerMemoryTurns(turns: List<Turn>): List<Turn> = turns.mapNotNull 
 
 internal fun latestWordsAreOwners(turns: List<Turn>): Boolean =
     turns.lastOrNull { it.memoryTexts().isNotEmpty() }?.ownerWords() != null
+
+/**
+ * The owner's own typed or spoken words in [turns] (one session's history), oldest first: the speech part of each user turn the
+ * agent wrote from [Agent.start], [Agent.followUp] or words said while a step worked. Never tool responses (stored under role "user"
+ * with no text part), card taps ([PICK_NOTE]), app-sent notes ([SENT_NOTE]), app annotations after the speech, or model text.
+ * The same boundary owner memory uses; the shortcut tool reads it so a link counts only when the owner gave it.
+ */
+fun ownerUtterances(turns: List<Turn>): List<String> = turns.mapNotNull { it.ownerWords() }

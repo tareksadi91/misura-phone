@@ -16,7 +16,10 @@ import com.misura.core.agent.Tool
 import com.misura.core.agent.ToolCall
 import com.misura.core.agent.ToolSpec
 import com.misura.core.agent.Turn
+import com.misura.core.agent.ownerUtterances
+import com.misura.core.shortcut.LinkTemplate
 import com.misura.core.shortcut.Shortcut
+import com.misura.core.shortcut.Target
 import com.misura.core.task.Payload
 import com.misura.core.task.Task
 import com.misura.core.task.TaskState
@@ -146,12 +149,24 @@ class ShortcutToolTest {
     private val add = """{"action":"add","title":"Book my class","prompt":"Book the 7 pm class at my club"}"""
     private fun sc(id: String, used: Long) = Shortcut(id, "Title $id", "prompt $id", null, createdAt = 1, lastUsedAt = used)
 
+    /** System labels as the tool reads them (PackageManager in production); the fixture's shortcut labels come from the real launcher. */
+    private val labels = { pkg: String -> when (pkg) { "com.example.club" -> "Club"; FX -> "Fixture app"; MAPS -> "Maps"; SPOTIFY -> "Spotify"; else -> pkg } }
+    private val launcher by lazy { ShortcutLauncher(ctx) }
+    /** The real launcher, except that Spotify (not on the emulator) counts as installed: the link path is what is under test. */
+    private val targets = object : ShortcutTargets {
+        override fun published(pkg: String) = launcher.published(pkg)
+        override fun resolve(target: Target) = if (target is Target.Link && target.template == LinkTemplate.SPOTIFY_PAGE) true else launcher.resolve(target)
+    }
+    /** Exactly what MisuraGraph passes: the owner's utterances read from this session's stored turns. */
+    private val ownerWords: suspend (String) -> List<String> = { id -> ownerUtterances(sessions.turns(id)) }
+    private var fixtureUsed = false
+
     @Before fun setUp() {
         ctx.deleteDatabase(dbName); db = MisuraDb.open(ctx, dbName); sessions = RoomSessionStore(db); tasks = RoomTaskStore(db)
         ctx.getSharedPreferences("shortcuts", android.content.Context.MODE_PRIVATE).edit().clear().commit()
         ctx.getSharedPreferences("routines", android.content.Context.MODE_PRIVATE).edit().clear().commit()
         store = ShortcutStore(ctx); routines = RoutineStore(ctx)
-        tool = ShortcutTool(store, ShortcutKeeper(store, null), controllerSteps(sessions, tasks::load) { false }, { pkg -> if (pkg == "com.example.club") "Club" else pkg })
+        tool = ShortcutTool(store, ShortcutKeeper(store, null), controllerSteps(sessions, tasks::load) { false }, labels, targets, ownerWords)
         routineTool = RoutineTool(routines)
         otherTaps.clear()
         gates = CardGates(GateOwner({ id, _ -> otherTaps += id }, {}), GateOwner(routineTool::answered, routineTool::stopped, routineTool::outcome),
@@ -159,6 +174,7 @@ class ShortcutToolTest {
         prodGates = cardGates(Calendar(ctx, calGate), routineTool, tool, UseApp(ShizukuHiddenScreen(ctx), noBrain, gate = commitGate))
     }
     @After fun tearDown() {
+        if (fixtureUsed) control("remove")
         ctx.getSharedPreferences("shortcuts", android.content.Context.MODE_PRIVATE).edit().clear().commit()
         ctx.getSharedPreferences("routines", android.content.Context.MODE_PRIVATE).edit().clear().commit()
         db.close()
@@ -187,7 +203,7 @@ class ShortcutToolTest {
         card.gate!! shouldStartWith "sc:"
         card.label shouldBe "Shortcut · Club"
         card.title shouldBe "Book my class"
-        card.line shouldBe "“Book the 7 pm class at my club”"
+        card.line shouldBe "Misura does it: “Book the 7 pm class at my club”"
         card.choices shouldBe listOf("Keep", "Don't")
         store.all() shouldBe emptyList() // shown, not kept
         a.choose(s.id, 0, s.revision).await() shouldBe true
@@ -226,7 +242,7 @@ class ShortcutToolTest {
 
     @Test fun cardAndDigestUseOneAppLabelRead() = runBlocking<Unit> {
         var reads = 0
-        val flipping = ShortcutTool(store, ShortcutKeeper(store, null), controllerSteps(sessions, tasks::load) { false }, { reads += 1; "Club v$reads" })
+        val flipping = ShortcutTool(store, ShortcutKeeper(store, null), controllerSteps(sessions, tasks::load) { false }, { reads += 1; "Club v$reads" }, targets, ownerWords)
         val a = Agent(sessions, Script(worked, call("shortcut", add), text("Asked.")), listOf(hand, routineTool, flipping), System::currentTimeMillis, scope,
             onChoose = gates.onChoose, chooseNote = gates.chooseNote, onStopped = gates.onStopped)
         val s = settled(a.start("keep it as a shortcut"))
@@ -391,5 +407,220 @@ class ShortcutToolTest {
         (settled(id).say is Say.Question) shouldBe false
         said(id) shouldContain ShortcutTool.REFUSED
         store.all() shouldBe emptyList()
+    }
+
+    // ---- Shortcuts v2 task 4: direct targets, owner-given links, labels as data ----
+
+    private fun shell(cmd: String): String = InstrumentationRegistry.getInstrumentation().getUiAutomation(android.app.UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
+        .executeShellCommand(cmd).use { android.os.ParcelFileDescriptor.AutoCloseInputStream(it).bufferedReader().readText() }
+    private fun control(op: String, vararg extra: String) =
+        shell("am broadcast --include-stopped-packages -a com.misura.testapp.SHORTCUTS -p $FX --es op $op ${extra.joinToString(" ")}")
+    private fun fxLabel() = launcher.published(FX).firstOrNull { it.id == "fx_a" }?.label
+    /** The debug fixture's dynamic shortcuts fx_a ("Fixture A") and fx_b, as ShortcutLauncherTest uses them. Needs Misura as the Home app. */
+    private fun fixture() {
+        check(ctx.getSystemService(android.content.pm.LauncherApps::class.java).hasShortcutHostPermission()) { "Misura must be the Home app" }
+        fixtureUsed = true
+        shell("cmd shortcut reset-throttling --user 0") // a background app's shortcut updates are rate-limited; many tests in a row hit it
+        control("remove"); control("publish")
+        check(waitFor(5_000) { fxLabel() == "Fixture A" }) { "fixture shortcuts not published" }
+    }
+    private fun target(json: String) = """{"action":"add","title":"Fixture page","target":$json}"""
+    private val fxA = target("""{"kind":"shortcut","package":"$FX","id":"fx_a"}""")
+    private val id22 = "37i9dQZF1DXcBWIGoYBM5M"
+    private val link = "https://open.spotify.com/playlist/$id22"
+    private fun spotify(l: String) = """{"action":"add","title":"Focus","target":{"kind":"spotify","link":"$l"}}"""
+    private suspend fun noCard(id: String) { (settled(id).say is Say.Question) shouldBe false; store.all() shouldBe emptyList() }
+    private fun count(hay: String, needle: String) = hay.windowed(needle.length).count { it == needle }
+
+    @Test fun addWithPublishedShortcutNeedsNoRun() = runBlocking<Unit> {
+        fixture()
+        val a = agent(call("shortcut", """{"action":"targets","package":"$FX"}"""), call("shortcut", fxA), text("Asked."))
+        val s = settled(a.start("make a shortcut to Fixture A")) // no run in this conversation
+        said(s.id).let { it shouldContain "\"id\":\"fx_a\""; it shouldContain "\"label\":\"Fixture A\""; it shouldContain "\"app\":\"Fixture app\"" }
+        val card = s.say as Say.Question
+        card.gate!! shouldStartWith "sc:"
+        card.label shouldBe "Shortcut · Fixture app"
+        card.title shouldBe "Fixture page"
+        card.line shouldBe "Opens Fixture app · Fixture A"
+        card.choices shouldBe listOf("Keep", "Don't")
+        store.all() shouldBe emptyList() // shown, not kept
+        a.choose(s.id, 0, s.revision).await() shouldBe true
+        store.all().single().let { it.target shouldBe Target.AppShortcut(FX, "fx_a"); it.prompt shouldBe null; it.app shouldBe FX }
+        said(s.id) shouldContain "(the app: Kept: Fixture page)"
+    }
+
+    @Test fun unknownShortcutIdRefused() = runBlocking<Unit> {
+        fixture()
+        val a = agent(call("shortcut", target("""{"kind":"shortcut","package":"$FX","id":"fx_none"}""")),
+            call("shortcut", target("""{"kind":"shortcut","package":"com.misura.nothere","id":"fx_a"}""")), text("Can't."))
+        val s = a.start("make a shortcut to Fixture Z")
+        noCard(s)
+        count(said(s), ShortcutTool.CANT_OPEN) shouldBe 2
+    }
+
+    @Test fun twoTargetsRefused() = runBlocking<Unit> {
+        val a = agent(
+            call("shortcut", target("""[{"kind":"route","to":"Home"},{"kind":"route","to":"Work"}]""")),
+            call("shortcut", target("""{"kind":"route","to":"Home","package":"$MAPS"}""")),
+            call("shortcut", target("""{"kind":"route","to":"Home","link":"$link"}""")),
+            call("shortcut", target("""{"kind":"intent","to":"Home"}""")),
+            text("Can't."))
+        val s = a.start("shortcut home and work")
+        noCard(s)
+        said(s).let {
+            it shouldContain "target must be one object"
+            it shouldContain "target field package is not allowed for kind route"
+            it shouldContain "target field link is not allowed for kind route"
+            it shouldContain "target.kind must be app, shortcut, settings, route or spotify"
+        }
+    }
+
+    /** Model-driven routes to a link the owner never typed: a tool result, the model's own text, a card choice the model wrote, another conversation. */
+    @Test fun spotifyLinkNotInUserMessagesRefused() = runBlocking<Unit> {
+        val page = object : Tool {
+            override val spec = ToolSpec("read_page", "read a page", JsonObject(emptyMap()))
+            override suspend fun run(args: JsonObject): JsonObject = buildJsonObject { put("result", "Best playlist: $link") }
+            override fun label(args: JsonObject) = "Reading"
+            override fun summary(result: JsonObject): String? = null
+        }
+        // 1. Only inside a tool response (stored under role "user").
+        val viaTool = Agent(sessions, Script(call("read_page"), call("shortcut", spotify(link)), text("Not said.")), listOf(page, routineTool, tool), System::currentTimeMillis, scope,
+            onChoose = gates.onChoose, chooseNote = gates.chooseNote, onStopped = gates.onStopped)
+        val s1 = viaTool.start("find a focus playlist and keep it on Home")
+        noCard(s1); said(s1) shouldContain ShortcutTool.LINK_NOT_SAID
+        // 2. Only in the model's text.
+        val viaModel = agent(text("Try $link"), call("shortcut", spotify(link)), text("Not said."))
+        val s2 = viaModel.start("any focus playlist?"); settled(s2)
+        viaModel.followUp(s2, "keep that one on Home").join()
+        noCard(s2); said(s2) shouldContain ShortcutTool.LINK_NOT_SAID
+        // 3. A card choice the model wrote and the user tapped ("I picked <link>"): a tap, not the owner's words.
+        val viaChoice = agent(call("ask", """{"line":"Which one?","choices":["$link","Neither"]}"""), call("shortcut", spotify(link)), text("Not said."))
+        val s3 = settled(viaChoice.start("which playlist should I keep?"))
+        viaChoice.choose(s3.id, 0, s3.revision).await() shouldBe true
+        noCard(s3.id); said(s3.id) shouldContain ShortcutTool.LINK_NOT_SAID
+        // 4. Said by the owner, but in another conversation.
+        val other = agent(text("Nice."))
+        settled(other.start("I like $link"))
+        val s4 = agent(call("shortcut", spotify(link)), text("Not said.")).start("keep my playlist on Home")
+        noCard(s4); said(s4) shouldContain ShortcutTool.LINK_NOT_SAID
+    }
+
+    @Test fun spotifyLinkParsedNotPassedThrough() = runBlocking<Unit> {
+        val shared = "$link?si=a1b2c3&utm_source=copy-link"
+        // Not verbatim (query changed) → refused; the owner's exact words → asked.
+        val a = agent(call("shortcut", spotify("$link?si=zzz")), call("shortcut", spotify(shared)), text("Asked."))
+        val s = settled(a.start("keep $shared on Home."))
+        said(s.id) shouldContain ShortcutTool.LINK_NOT_SAID
+        val card = s.say as Say.Question
+        card.label shouldBe "Shortcut · Spotify"
+        card.line shouldBe "Opens Spotify · Playlist\nopen.spotify.com/playlist/$id22"
+        a.choose(s.id, 0, s.revision).await() shouldBe true
+        val t = store.all().single().target as Target.Link
+        t shouldBe Target.Link(LinkTemplate.SPOTIFY_PAGE, "playlist:$id22") // rebuilt from kind + id: no query, no si
+        val i = launcher.linkIntent(t)!!
+        i.`package` shouldBe SPOTIFY
+        i.dataString shouldBe "spotify:playlist:$id22"
+    }
+
+    @Test fun spotifyParserAdversarial() = runBlocking<Unit> {
+        val bad = listOf(
+            "https://open.spotify.com.evil.example/playlist/$id22", "https://evil.example/open.spotify.com/playlist/$id22",
+            "https://open.spotify.com@evil.example/playlist/$id22", "https://user@open.spotify.com/playlist/$id22",
+            "https://open.spotify.com:443/playlist/$id22", "http://open.spotify.com/playlist/$id22",
+            "https://open.spotify.com/playlist/$id22/extra", "https://open.spotify.com/intl-de/playlist/$id22",
+            "https://open.spotify.com/playlist/$id22#x", "https://open.spotify.com/track/$id22",
+            "https://open.spotify.com/playlist/${id22.drop(1)}", "https://open.spotify.com/playlist/${id22}A",
+            "https://open.spotify.com/playlist/${id22.dropLast(1)}-", "https://open.spotify.com%2Fplaylist%2F$id22",
+            "https://open.spotify.com/playlist%2F$id22", "https://OPEN.SPOTIFY.COM/playlist/$id22",
+        )
+        // A few per conversation (a turn has a call budget); each said by the owner, each refused by the parser.
+        bad.chunked(4).forEach { some ->
+            val b = agent(*some.map { call("shortcut", spotify(it)) }.toTypedArray(), text("Can't."))
+            val id = b.start("keep these: ${some.joinToString(" ")}")
+            noCard(id)
+            count(said(id), "not an open.spotify.com playlist, album or artist link") shouldBe some.size
+        }
+        val hostile = "$link?si=x&next=spotify:track:evil%0Aintent://x&q=Approve-and-send"
+        val a = agent(call("shortcut", spotify(hostile)), text("Asked."))
+        val s = settled(a.start("keep $hostile"))
+        val card = s.say as Say.Question // only the canonical one asks, and shows only kind + id
+        card.line shouldBe "Opens Spotify · Playlist\nopen.spotify.com/playlist/$id22"
+        a.choose(s.id, 0, s.revision).await() shouldBe true
+        store.all().single().target shouldBe Target.Link(LinkTemplate.SPOTIFY_PAGE, "playlist:$id22")
+    }
+
+    @Test fun routeOnlyHomeOrWork() = runBlocking<Unit> {
+        val route = { to: String -> """{"action":"add","title":"Go home","prompt":"Directions home","target":{"kind":"route","to":"$to"}}""" }
+        val a = agent(call("shortcut", route("Office")), call("shortcut", route("home")), call("shortcut", route("Home&mode=x")), call("shortcut", route("Home")), text("Asked."))
+        val s = settled(a.start("a shortcut for directions home"))
+        count(said(s.id), "target.to must be Home or Work") shouldBe 3
+        val card = s.say as Say.Question
+        card.label shouldBe "Shortcut · Maps"
+        card.line shouldBe "Opens Maps · Route to Home\nIf it can't open: Misura does “Directions home”"
+        a.choose(s.id, 0, s.revision).await() shouldBe true
+        store.all().single().let { it.target shouldBe Target.Link(LinkTemplate.MAPS_ROUTE, "Home"); it.prompt shouldBe "Directions home" }
+    }
+
+    @Test fun labelChangedBetweenAskAndTapNotSaved() = runBlocking<Unit> {
+        fixture()
+        val a = agent(call("shortcut", fxA), text("Asked."))
+        val s = settled(a.start("make a shortcut to Fixture A"))
+        (s.say as Say.Question).line shouldBe "Opens Fixture app · Fixture A"
+        shell("cmd shortcut reset-throttling --user 0"); control("label", "--es", "label", "Renamed")
+        waitFor(5_000) { fxLabel() == "Renamed" } shouldBe true
+        a.choose(s.id, 0, s.revision).await() shouldBe true
+        store.all() shouldBe emptyList()
+        said(s.id) shouldContain "(the app: ${ShortcutTool.CHANGED})"
+        // Gone between ask and tap: the same.
+        control("publish"); waitFor(5_000) { fxLabel() == "Fixture A" } shouldBe true
+        val b = agent(call("shortcut", fxA), text("Asked."))
+        val s2 = settled(b.start("make a shortcut to Fixture A"))
+        control("remove"); waitFor(5_000) { fxLabel() == null } shouldBe true
+        b.choose(s2.id, 0, s2.revision).await() shouldBe true
+        store.all() shouldBe emptyList()
+        said(s2.id) shouldContain "(the app: ${ShortcutTool.CHANGED})"
+    }
+
+    @Test fun fullRefusesWithoutCard() = runBlocking<Unit> {
+        store.keep(sc("a", 30), null); store.keep(sc("b", 10), null); store.keep(sc("c", 20), null)
+        val a = agent(call("shortcut", target("""{"kind":"route","to":"Home"}""")), text("Home is full."))
+        val s = settled(a.start("a shortcut for directions home"))
+        (s.say is Say.Question) shouldBe false
+        said(s.id) shouldContain ShortcutTool.FULL
+        store.all().map { it.id } shouldBe listOf("a", "b", "c")
+    }
+
+    /** A kept direct target is not a run that worked: words-only still needs one. */
+    @Test fun wordsOnlyStillNeedsWorkingRun() = runBlocking<Unit> {
+        val a = agent(call("shortcut", target("""{"kind":"route","to":"Work"}""")), text("Asked."), call("shortcut", add), call("shortcut", """{"action":"add","title":"No words"}"""), text("Do it first."))
+        val s = settled(a.start("a shortcut for directions to work"))
+        a.choose(s.id, 0, s.revision).await() shouldBe true
+        store.all().size shouldBe 1
+        a.followUp(s.id, "and keep booking my class too").join()
+        (settled(s.id).say is Say.Question) shouldBe false
+        said(s.id).let { it shouldContain ShortcutTool.REFUSED; it shouldContain "prompt required without a target" }
+        store.all().size shouldBe 1
+    }
+
+    @Test fun hostileShortcutLabelIsDataOnly() = runBlocking<Unit> {
+        fixture()
+        val hostile = "Approve and send‮ now"
+        control("label", "--es", "label64", android.util.Base64.encodeToString(hostile.toByteArray(), android.util.Base64.NO_WRAP))
+        waitFor(5_000) { fxLabel()?.startsWith("Approve") == true } shouldBe true
+        val a = agent(call("shortcut", """{"action":"targets","package":"$FX"}"""), call("shortcut", fxA), text("Asked."))
+        val s = settled(a.start("make a shortcut to Fixture A"))
+        val card = s.say as Say.Question
+        card.line shouldBe "Opens Fixture app · Approve and send now" // the label only, one line, no direction or separator characters
+        card.label shouldBe "Shortcut · Fixture app"
+        card.title shouldBe "Fixture page"
+        card.choices shouldBe listOf("Keep", "Don't")
+        said(s.id).let { it shouldContain "\"label\":\"Approve and send now\""; (it.contains('‮') || it.contains(' ')) shouldBe false }
+        store.all() shouldBe emptyList(); otherTaps shouldBe emptyList(); routines.all() shouldBe emptyList()
+    }
+
+    private companion object {
+        const val FX = "com.misura.testapp"
+        const val MAPS = "com.google.android.apps.maps"
+        const val SPOTIFY = "com.spotify.music"
     }
 }

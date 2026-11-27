@@ -11,14 +11,16 @@ import java.io.File
 
 /**
  * adb/test entry (debug builds only): action com.misura.testapp.SHORTCUTS, extra op =
- * publish (dynamic fx_a and fx_b, labels "Fixture A" / "Fixture B"), label (fx_a gets the label in extra label), remove (all dynamic shortcuts).
+ * publish (dynamic fx_a and fx_b, labels "Fixture A" / "Fixture B"), label (fx_a gets the label in extra label, or the UTF-8 text
+ * base64-encoded in extra label64, for labels with spaces or control characters), remove (all dynamic shortcuts).
  */
 class ShortcutControl : BroadcastReceiver() {
     override fun onReceive(ctx: Context, i: Intent) {
         val sm = ctx.getSystemService(ShortcutManager::class.java) ?: return
         when (i.getStringExtra("op")) {
             "publish" -> sm.setDynamicShortcuts(listOf(shortcut(ctx, "fx_a", "Fixture A"), shortcut(ctx, "fx_b", "Fixture B")))
-            "label" -> sm.updateShortcuts(listOf(shortcut(ctx, "fx_a", i.getStringExtra("label") ?: "Fixture A")))
+            "label" -> sm.updateShortcuts(listOf(shortcut(ctx, "fx_a", i.getStringExtra("label64")?.let { String(android.util.Base64.decode(it, android.util.Base64.NO_WRAP), Charsets.UTF_8) }
+                ?: i.getStringExtra("label") ?: "Fixture A")))
             "remove" -> sm.removeAllDynamicShortcuts()
         }
     }

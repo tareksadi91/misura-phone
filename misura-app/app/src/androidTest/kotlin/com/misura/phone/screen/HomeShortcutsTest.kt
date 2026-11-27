@@ -417,6 +417,35 @@ class HomeShortcutsTest {
         brain.tools.size shouldBe 1
     }
 
+    /** The real store, except that saving a new THINKING session waits on [gate] while it is set (Agent.start's save). */
+    private class SlowSave(private val d: com.misura.core.agent.SessionStore) : com.misura.core.agent.SessionStore by d {
+        @Volatile var gate: CompletableDeferred<Unit>? = null
+        override suspend fun save(s: Session) { if (s.status == SessionStatus.THINKING) gate?.await(); d.save(s) }
+    }
+
+    /**
+     * Codex final re-check: the fallback's own session save suspends (Agent.start); the owner opens an existing task meanwhile.
+     * When the save lets go, the fallback session exists (a normal task in the list) but the task the owner opened stays in front.
+     */
+    @Test fun fallbackSavedLateDoesNotReplaceAnOpenedTask() {
+        ready("r")
+        val slow = SlowSave(sessions); val gate = CompletableDeferred<Unit>(); slow.gate = gate
+        val a = Agent(slow, Script(text("fallback ran")), listOf(hand), System::currentTimeMillis, scope)
+        val o = fake(false)
+        keepTarget("Wifi", Target.Settings(com.misura.core.shortcut.SettingsPage.WIFI), prompt); showWith(o, a)
+        val task = hasContentDescription(", ready for your go", substring = true)
+        waitFor(line("Wifi")); waitFor(task)
+        rule.onNode(line("Wifi")).performClick(); rule.waitUntil(5_000) { o.answers.size == 1 }
+        Thread.sleep(300); rule.waitForIdle() // the fallback is now held in its session save
+        rule.onNode(task).performClick()
+        waitFor(hasText("Which park?", substring = true))
+        gate.complete(Unit)
+        rule.waitUntil(8_000) { runBlocking { sessions.recent(5).size } == 2 } // the fallback session was still made
+        Thread.sleep(1_500); rule.waitForIdle()
+        rule.onAllNodes(hasText("Which park?", substring = true)).fetchSemanticsNodes().isNotEmpty() shouldBe true
+        rule.onAllNodes(hasText("fallback ran", substring = true)).fetchSemanticsNodes().isEmpty() shouldBe true
+    }
+
     /** A target that opens wins even when saved words exist: the agent never starts. */
     @Test fun targetOpensWithPromptStartsNoAgent() {
         val brain = Script(text("should not run")); val o = fake()

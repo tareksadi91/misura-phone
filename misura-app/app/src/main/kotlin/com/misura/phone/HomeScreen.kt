@@ -279,7 +279,8 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
     }
     LaunchedEffect(plainHome, homeTap, openRequest) { if (sheet.engaged || sheet.searching) sheet.close() }
 
-    LaunchedEffect(openRequest) { openRequest?.let { openId = it.sessionId; nav = Nav() } }
+    LaunchedEffect(openRequest) { openRequest?.let { navEpoch.incrementAndGet(); openId = it.sessionId; nav = Nav() } }
+    // Every navigation also bumps it synchronously where it happens (taps, back, Home); this catches any other change of what is in front.
     LaunchedEffect(openId, earlier) { navEpoch.incrementAndGet() }
     LaunchedEffect(openId) {
         var lastPlaces: List<String>? = null
@@ -335,9 +336,15 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
         }
     }
 
-    fun goHome() { openId = null; nav = Nav(); targetId = null; targetSession = null; cleared = false; earlier = false }
+    fun goHome() { navEpoch.incrementAndGet(); openId = null; nav = Nav(); targetId = null; targetSession = null; cleared = false; earlier = false }
     // A new task: typed or spoken words (OWNER), or a kept shortcut's saved request (SHORTCUT: same path, full tools, but not the owner's words now).
     suspend fun startTask(t: String, origin: com.misura.core.agent.TurnOrigin) { val new = agent.start(t, origin); openId = new; nav = Nav(); targetId = null; targetSession = null; cleared = false }
+    // A shortcut's saved words start a task; it comes to the front only if nothing newer was asked or opened while it was being
+    // made (Agent.start suspends on its session save). Otherwise it is a normal task in the list, behind what the owner chose.
+    suspend fun startShortcutTask(t: String, epoch: Int) {
+        val new = agent.start(t, com.misura.core.agent.TurnOrigin.SHORTCUT)
+        if (navEpoch.get() == epoch && openId == null && !earlier) { openId = new; nav = Nav(); targetId = null; targetSession = null; cleared = false }
+    }
     fun startShortcut(sc: com.misura.core.shortcut.Shortcut) {
         if (startingShortcut || android.os.SystemClock.uptimeMillis() < directUntil || sheet.moving || sheet.engaged || sheet.searching || openId != null) return
         startingShortcut = true; lineNote = null
@@ -353,8 +360,8 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
                     else if (!current) return@launch
                     // A target that will not open falls back to the saved words when there are some; otherwise the line says so and stays.
                     else if (sc.prompt == null) { lineNote = sc.id to "Couldn't open. Try again."; return@launch }
-                    if (!opened) startTask(sc.prompt!!, com.misura.core.agent.TurnOrigin.SHORTCUT)
-                } else startTask(sc.prompt!!, com.misura.core.agent.TurnOrigin.SHORTCUT)
+                    if (!opened) startShortcutTask(sc.prompt!!, epoch)
+                } else startShortcutTask(sc.prompt!!, epoch)
                 try { withContext(Dispatchers.IO) { shortcutStore?.used(sc.id, System.currentTimeMillis()) } }
                 catch (_: com.misura.phone.store.StorageUnavailableException) {} // it ran; only its last-used time is lost
             } finally { startingShortcut = false }
@@ -372,7 +379,7 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
             requestIme.focusLost(); requestIme.cancel(); focus.clearFocus()
         }
     }
-    BackHandler(enabled = openId != null || earlier) { if (openId == null) earlier = false else nav = nav.back() ?: run { goHome(); nav } }
+    BackHandler(enabled = openId != null || earlier) { navEpoch.incrementAndGet(); if (openId == null) earlier = false else nav = nav.back() ?: run { goHome(); nav } }
     BackHandler(enabled = animateRequest && focused) { requestIme.hide() }
 
     MisuraSurface {
@@ -401,12 +408,12 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
             val say = o?.s?.say?.let { if (o.stale && it is Say.Answer && it.citations.isEmpty()) Say.Answer("Older answer. Ask again for current details.") else it }
 
             if (openId == null && earlier) Column(Modifier.weight(1f)) {
-                NavLine("Home", "Earlier", 0, onBack = { earlier = false }, onSteps = {}, Modifier.padding(horizontal = M.gutter - M.m))
+                NavLine("Home", "Earlier", 0, onBack = { navEpoch.incrementAndGet(); earlier = false }, onSteps = {}, Modifier.padding(horizontal = M.gutter - M.m))
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = M.gutter - M.m)) {
                     // Open ones first, each with its sign, then everything else newest first.
                     rows.sortedBy { it.kind == com.misura.core.agent.HomeKind.DONE }.forEach { r -> key(r.id) { TaskLine(r.line, sign = when (r.kind) {
                         com.misura.core.agent.HomeKind.YOURS -> ({ com.misura.phone.screen.YourGo() }); com.misura.core.agent.HomeKind.RUNNING -> ({ com.misura.phone.screen.WorkingDot() })
-                        com.misura.core.agent.HomeKind.FAILED -> ({ Text("✕", style = ST.step, color = M.orange) }); else -> null }, maxLines = 2, action = "Delete", onRemove = { agent.delete(r.id).await(); rows = rows.filter { it.id != r.id } }) { openId = r.id; nav = Nav() } } }
+                        com.misura.core.agent.HomeKind.FAILED -> ({ Text("✕", style = ST.step, color = M.orange) }); else -> null }, maxLines = 2, action = "Delete", onRemove = { agent.delete(r.id).await(); rows = rows.filter { it.id != r.id } }) { navEpoch.incrementAndGet(); openId = r.id; nav = Nav() } } }
                 }
             }
             else if (openId == null) Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -419,10 +426,10 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
                         // A failed write throws: the line springs back (SwipeTaskLine) and the shortcut stays kept.
                         withContext(Dispatchers.IO) { keeper?.remove(sc.id) }
                         shortcuts = shortcuts.filter { it.id != sc.id }
-                    }, note = lineNote, menuFor = menuFor, onMenu = { menuFor = it }, onNote = { lineNote = it }, onEarlier = { if (!sheet.searching) earlier = true }, onDismiss = { ids ->
+                    }, note = lineNote, menuFor = menuFor, onMenu = { menuFor = it }, onNote = { lineNote = it }, onEarlier = { if (!sheet.searching) { navEpoch.incrementAndGet(); earlier = true } }, onDismiss = { ids ->
                         if (!sheet.searching) { ids.map { agent.dismiss(it) }.forEach { it.await() }; rows = rows.map { if (it.id in ids) it.copy(fresh = false) else it } }
                     }, hint = { com.misura.phone.screen.FirstUseHints(sheet, !focused && !listening && !homeHasLines) }) {
-                        if (!sheet.searching) { openId = it; nav = Nav() }
+                        if (!sheet.searching) { navEpoch.incrementAndGet(); openId = it; nav = Nav() }
                     }
                 }
                 AppSheet(sheet, currentApps, openApp, onSettings = onOpenSettings, home = sheetHome)

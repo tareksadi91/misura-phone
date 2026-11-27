@@ -10,7 +10,7 @@ import com.misura.core.agent.shownSteps
 import com.misura.core.routine.RoutineGate
 import com.misura.core.shortcut.Shortcut
 import com.misura.core.shortcut.digest
-import com.misura.core.shortcut.replaces
+import com.misura.core.shortcut.isFull
 import com.misura.core.shortcut.workedSteps
 import com.misura.core.task.Task
 import com.misura.phone.store.StorageUnavailableException
@@ -48,7 +48,7 @@ class ShortcutTool(
     override val spec = ToolSpec("shortcut",
         "Keep a request on Home so the user can run it again with one tap. Only when the user asks for a shortcut. If the task has not run in this conversation yet, do it first with your other tools (exactly as if the user had asked for it), then call add; never send the user away to do it themselves. " +
             "action=add with title (a few words shown on Home, at most ${Shortcut.MAX_TITLE} characters) and prompt (the request exactly as it should run again, self-contained, at most ${Shortcut.MAX_PROMPT} characters). " +
-            "add is refused until a run in this conversation worked in an app; if the run failed, say so instead. Home keeps at most ${Shortcut.MAX}; when full, the card says which one it replaces. " +
+            "add is refused until a run in this conversation worked in an app; if the run failed, say so instead. Home keeps at most ${Shortcut.MAX}; when full, add is refused until one is removed. " +
             "This shows a card; the user's tap keeps it. The app then tells you what the tap did: say only that, in two or three words. " +
             "action=list shows kept shortcuts; action=remove with id removes one (also after a tap).",
         schema("action" to "string", "title" to "string", "prompt" to "string", "id" to "string", required = listOf("action")))
@@ -89,16 +89,16 @@ class ShortcutTool(
         val session = coroutineContext[RunningFor]?.session
         // Unknown session or unreadable steps = nothing proven to have worked.
         val app = session?.let { id -> runCatching { workedSteps(steps(id)) }.getOrNull() } ?: return err(REFUSED)
-        val replacing = replaces(store.all())
-        // The id and time are not part of what the user approves; the digest binds title, prompt, app and the replaced shortcut.
+        if (isFull(store.all())) return err(FULL)
+        // The id and time are not part of what the user approves; the digest binds title, prompt, app and the labels shown.
         val draft = Shortcut("new", title, prompt, app, createdAt = 0)
-        val r = gate.act("keep", draft.digest(replacing?.id), session) {
+        val r = gate.act("keep", draft.digest(null, appLabel(app), null), session) {
             try {
-                if (store.keep(draft.copy(id = UUID.randomUUID().toString(), createdAt = clock()), replacing?.id)) "Kept: $title"
+                if (store.keep(draft.copy(id = UUID.randomUUID().toString(), createdAt = clock()), null)) "Kept: $title"
                 else "Not kept: Home changed, ask again"
             } catch (_: StorageUnavailableException) { STORAGE }
         }
-        val line = "“$prompt”" + (replacing?.let { " Replaces “${it.title}”." } ?: "")
+        val line = "“$prompt”"
         return card(r, "Shortcut · ${appLabel(app)}", title, line, "Keep")
     }
 
@@ -111,6 +111,7 @@ class ShortcutTool(
     }
 
     companion object {
+        const val FULL = "Home is full: remove one first"
         const val REFUSED = "do the task first; only a run that worked can be kept"
         /** Same words Home uses when a save fails (HomeScreen send tap). */
         const val STORAGE = "Not done: Misura couldn't save progress."

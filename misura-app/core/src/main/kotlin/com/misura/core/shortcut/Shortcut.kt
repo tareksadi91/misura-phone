@@ -4,14 +4,76 @@ import com.misura.core.agent.NOTE
 import com.misura.core.agent.Step
 import com.misura.core.agent.StepState
 import com.misura.core.agent.WEB
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.security.MessageDigest
 
-/** A saved one-tap request on Home. [app] is the package it worked through (its icon), null = line icon only. */
+/** Settings pages a shortcut can open; the app module maps each to its Settings action. [APP_DETAILS] needs a subject package. */
+@Serializable
+enum class SettingsPage { WIFI, BLUETOOTH, BATTERY_SAVER, DISPLAY, SOUND, LOCATION, NOTIFICATIONS, APP_DETAILS }
+
+/** Reviewed link templates only: the URI is built from a fixed template and a code-validated param, never model-authored. */
+@Serializable
+enum class LinkTemplate { MAPS_ROUTE, SPOTIFY_PAGE }
+
+private val SPOTIFY_PARAM = Regex("(playlist|album|artist):[A-Za-z0-9]{22}")
+private val SPOTIFY_LINK = Regex("https://open\\.spotify\\.com/(playlist|album|artist)/([A-Za-z0-9]{22})(\\?[^#\\s]*)?")
+
+/** The URI for [param], or null when the param fails this template's validation. MAPS_ROUTE: exactly `Home` or `Work`; SPOTIFY_PAGE: `<playlist|album|artist>:<22 base62>`, case kept. */
+fun LinkTemplate.uri(param: String): String? = when (this) {
+    LinkTemplate.MAPS_ROUTE -> if (param == "Home" || param == "Work") "https://www.google.com/maps/dir/?api=1&destination=$param" else null
+    LinkTemplate.SPOTIFY_PAGE -> if (SPOTIFY_PARAM.matches(param)) "spotify:$param" else null
+}
+
+/** A link the user gave, accepted only as `https://open.spotify.com/(playlist|album|artist)/<22 base62>` (optional `?query` ignored; no userinfo, port, fragment or extra path). */
+fun parseSpotifyLink(text: String): Target.Link? =
+    SPOTIFY_LINK.matchEntire(text)?.let { Target.Link(LinkTemplate.SPOTIFY_PAGE, "${it.groupValues[1]}:${it.groupValues[2]}") }
+
+/** Where a tap goes directly. All code-resolved, never model-authored strings. */
+@Serializable
+sealed interface Target {
+    @Serializable @SerialName("app") data class App(val pkg: String) : Target
+    @Serializable @SerialName("shortcut") data class AppShortcut(val pkg: String, val id: String) : Target
+    @Serializable @SerialName("settings") data class Settings(val page: SettingsPage, val subjectPackage: String? = null) : Target {
+        init {
+            if (page == SettingsPage.APP_DETAILS) require(!subjectPackage.isNullOrEmpty()) { "APP_DETAILS needs a subjectPackage" }
+            else require(subjectPackage == null) { "$page takes no subjectPackage" }
+        }
+    }
+    @Serializable @SerialName("link") data class Link(val template: LinkTemplate, val param: String) : Target
+}
+
+/** The package whose icon a target shows; Settings has none. */
+val Target.pkg: String? get() = when (this) {
+    is Target.App -> pkg
+    is Target.AppShortcut -> pkg
+    is Target.Settings -> null
+    is Target.Link -> when (template) { LinkTemplate.MAPS_ROUTE -> "com.google.android.apps.maps"; LinkTemplate.SPOTIFY_PAGE -> "com.spotify.music" }
+}
+
+private fun esc(s: String?) = s.orEmpty().replace("\\", "\\\\").replace("|", "\\|")
+
+/** Canonical `kind|pkg|id|page|subject|template|param` (fields escaped, so no field can forge another): equality, duplicates and the digest. */
+fun Target.key(): String = when (this) {
+    is Target.App -> listOf("app", pkg, "", "", "", "", "")
+    is Target.AppShortcut -> listOf("shortcut", pkg, id, "", "", "", "")
+    is Target.Settings -> listOf("settings", "", "", page.name, subjectPackage ?: "", "", "")
+    is Target.Link -> listOf("link", "", "", "", "", template.name, param)
+}.joinToString("|") { esc(it) }
+
+/**
+ * A saved one-tap shortcut on Home: an optional direct [target] and/or optional saved words ([prompt]), at least one.
+ * [app] is the package whose icon it shows: with a target it is derived from it ([Target.pkg], never given otherwise).
+ */
 @Serializable
 data class Shortcut(
-    val id: String, val title: String, val prompt: String, val app: String?, val createdAt: Long, val lastUsedAt: Long? = null,
+    val id: String, val title: String, val prompt: String?, val app: String?, val target: Target? = null, val createdAt: Long, val lastUsedAt: Long? = null,
 ) {
+    init {
+        require(prompt != null || target != null) { "a shortcut needs saved words or a target" }
+        if (target != null) require(app == target.pkg) { "app must be the target's package" }
+    }
+
     companion object {
         const val MAX = 3
         const val LINE_BUDGET = 4
@@ -44,12 +106,11 @@ fun homeFit(yours: Int, failed: Int, running: Int, kept: Int, slots: Int): HomeF
     return HomeFit(y, f, r, s)
 }
 
-/** The shortcut a new one would replace: null below [Shortcut.MAX], else the least recently used (ties: first kept). */
-fun replaces(kept: List<Shortcut>): Shortcut? =
-    if (kept.size < Shortcut.MAX) null else kept.minByOrNull { it.lastUsedAt ?: it.createdAt }
+/** True when Home already keeps [Shortcut.MAX]: a new one is refused until one is removed (no replacement). */
+fun isFull(kept: List<Shortcut>): Boolean = kept.size >= Shortcut.MAX
 
-/** Every field the Save tap approves, length-prefixed like Routine.digest(), so the tap binds to exactly what the card showed. */
-fun Shortcut.digest(replacing: String?): String {
-    val bytes = listOf(title, prompt, app, replacing).joinToString("") { "${it?.length ?: -1}:${it.orEmpty()}" }.toByteArray(Charsets.UTF_8)
+/** Every field the Save tap approves, length-prefixed like Routine.digest(), so the tap binds to exactly what the card showed (including the destination and labels it displayed). */
+fun Shortcut.digest(replacing: String?, shownApp: String?, shownShortcut: String?): String {
+    val bytes = listOf(title, prompt, app, target?.key(), shownApp, shownShortcut, replacing).joinToString("") { "${it?.length ?: -1}:${it.orEmpty()}" }.toByteArray(Charsets.UTF_8)
     return MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 }

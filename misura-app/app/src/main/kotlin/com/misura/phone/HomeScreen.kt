@@ -325,7 +325,7 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
         startingShortcut = true
         scope.launch {
             try {
-                startTask(sc.prompt)
+                startTask(sc.prompt ?: return@launch) // target-only shortcuts open directly (v2 Task 4); none are created yet
                 try { withContext(Dispatchers.IO) { shortcutStore?.used(sc.id, System.currentTimeMillis()) } }
                 catch (_: com.misura.phone.store.StorageUnavailableException) {} // the task runs; only its last-used time is lost
             } finally { startingShortcut = false }

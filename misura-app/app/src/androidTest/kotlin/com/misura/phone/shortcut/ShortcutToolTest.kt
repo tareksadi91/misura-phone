@@ -224,24 +224,13 @@ class ShortcutToolTest {
         store.all() shouldBe emptyList()
     }
 
-    @Test fun addWhenFullNamesTheReplacement() = runBlocking<Unit> {
+    @Test fun addWhenFullIsRefusedWithoutACard() = runBlocking<Unit> {
         store.keep(sc("a", 30), null); store.keep(sc("b", 10), null); store.keep(sc("c", 20), null)
-        val a = agent(worked, call("shortcut", add), text("Kept."))
+        val a = agent(worked, call("shortcut", add), text("Home is full."))
         val s = settled(a.start("keep it as a shortcut"))
-        (s.say as Say.Question).line shouldBe "“Book the 7 pm class at my club” Replaces “Title b”."
+        (s.say is Say.Question) shouldBe false
+        said(s.id) shouldContain "Home is full: remove one first"
         store.all().map { it.id } shouldBe listOf("a", "b", "c")
-        a.choose(s.id, 0, s.revision).await() shouldBe true
-        store.all().map { it.title } shouldBe listOf("Title a", "Title c", "Book my class")
-    }
-
-    @Test fun changedReplacementIsNotSaved() = runBlocking<Unit> {
-        store.keep(sc("a", 30), null); store.keep(sc("b", 10), null); store.keep(sc("c", 20), null)
-        val a = agent(worked, call("shortcut", add), text("Not kept."))
-        val s = settled(a.start("keep it as a shortcut"))
-        store.remove("b") shouldBe true // removed between the ask and the tap
-        a.choose(s.id, 0, s.revision).await() shouldBe true
-        store.all().map { it.id } shouldBe listOf("a", "c")
-        said(s.id) shouldContain "Not kept: Home changed, ask again"
     }
 
     @Test fun longPromptRefusedNotTruncated() = runBlocking<Unit> {

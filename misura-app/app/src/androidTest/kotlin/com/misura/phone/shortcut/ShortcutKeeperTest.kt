@@ -64,7 +64,11 @@ class ShortcutKeeperTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pkg = "com.example.club"
     /** Cancels the agent scope (its gate workers and turns) and waits, bounded, so nothing outlives the test. */
-    private fun stopScope() { runBlocking { kotlinx.coroutines.withTimeoutOrNull<Unit>(10_000) { scope.coroutineContext[kotlinx.coroutines.Job]!!.cancelAndJoin() } } }
+    private fun stopScope() {
+        val job = scope.coroutineContext[kotlinx.coroutines.Job]!!
+        val done = runBlocking { kotlinx.coroutines.withTimeoutOrNull<Unit>(10_000) { job.cancelAndJoin() } }
+        check(done != null && job.isCompleted) { "agent scope did not stop within 10 s: a worker would outlive the test" }
+    }
 
     /** The launcher's pinned set per package: `pin` replaces the whole set (Android's pinShortcuts), like the real thing. */
     private class FakePins : ShortcutPins {
@@ -280,6 +284,7 @@ class ShortcutKeeperTest {
         } finally { // a failed assertion must not leave the holder blocked or a worker alive for the next test
             release.countDown()
             slow?.join(10_000)
+            check(slow?.isAlive != true) { "the lock-holder thread did not finish within 10 s" }
             stopScope()
         }
     }

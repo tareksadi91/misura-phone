@@ -92,14 +92,15 @@ class ShortcutTool(
         if (isFull(store.all())) return err(FULL)
         // The id and time are not part of what the user approves; the digest binds title, prompt, app and the labels shown.
         val draft = Shortcut("new", title, prompt, app, createdAt = 0)
-        val r = gate.act("keep", draft.digest(null, appLabel(app), null), session) {
+        val shownApp = appLabel(app) // read once: the digest and the card bind the same words
+        val r = gate.act("keep", draft.digest(null, shownApp, null), session) {
             try {
                 if (store.keep(draft.copy(id = UUID.randomUUID().toString(), createdAt = clock()), null)) "Kept: $title"
                 else "Not kept: Home changed, ask again"
             } catch (_: StorageUnavailableException) { STORAGE }
         }
         val line = "“$prompt”"
-        return card(r, "Shortcut · ${appLabel(app)}", title, line, "Keep")
+        return card(r, "Shortcut · $shownApp", title, line, "Keep")
     }
 
     private suspend fun remove(args: JsonObject): JsonObject {

@@ -63,16 +63,19 @@ fun Target.key(): String = when (this) {
 
 /**
  * A saved one-tap shortcut on Home: an optional direct [target] and/or optional saved words ([prompt]), at least one.
- * [app] is the package whose icon it shows: with a target it is derived from it ([Target.pkg], never given otherwise).
+ * [app] is the package whose icon it shows. With a target it is DERIVED from it ([Target.pkg]; Settings has none) and any
+ * supplied value is ignored, so `copy(target = ...)` can never leave a stale icon; without a target the supplied value
+ * (a prompt-only record's worked app, legacy JSON included) is kept.
  */
 @Serializable
 data class Shortcut(
-    val id: String, val title: String, val prompt: String?, val app: String?, val target: Target? = null, val createdAt: Long, val lastUsedAt: Long? = null,
+    val id: String, val title: String, val prompt: String?,
+    @SerialName("app") private val suppliedApp: String?,
+    val target: Target? = null, val createdAt: Long, val lastUsedAt: Long? = null,
 ) {
-    init {
-        require(prompt != null || target != null) { "a shortcut needs saved words or a target" }
-        if (target != null) require(app == target.pkg) { "app must be the target's package" }
-    }
+    init { require(prompt != null || target != null) { "a shortcut needs saved words or a target" } }
+
+    val app: String? get() = if (target != null) target.pkg else suppliedApp
 
     companion object {
         const val MAX = 3

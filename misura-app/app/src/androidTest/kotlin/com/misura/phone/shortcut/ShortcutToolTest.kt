@@ -224,6 +224,16 @@ class ShortcutToolTest {
         store.all() shouldBe emptyList()
     }
 
+    @Test fun cardAndDigestUseOneAppLabelRead() = runBlocking<Unit> {
+        var reads = 0
+        val flipping = ShortcutTool(store, controllerSteps(sessions, tasks::load) { false }, { reads += 1; "Club v$reads" })
+        val a = Agent(sessions, Script(worked, call("shortcut", add), text("Asked.")), listOf(hand, routineTool, flipping), System::currentTimeMillis, scope,
+            onChoose = gates.onChoose, chooseNote = gates.chooseNote, onStopped = gates.onStopped)
+        val s = settled(a.start("keep it as a shortcut"))
+        (s.say as Say.Question).label shouldBe "Shortcut · Club v1"
+        reads shouldBe 1 // a second read (the digest's) would have shown v2 on the card or bound v2 to it
+    }
+
     @Test fun addWhenFullIsRefusedWithoutACard() = runBlocking<Unit> {
         store.keep(sc("a", 30), null); store.keep(sc("b", 10), null); store.keep(sc("c", 20), null)
         val a = agent(worked, call("shortcut", add), text("Home is full."))

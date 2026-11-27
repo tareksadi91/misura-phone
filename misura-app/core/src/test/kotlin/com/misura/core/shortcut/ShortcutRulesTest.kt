@@ -81,12 +81,26 @@ class ShortcutRulesTest {
         Shortcut("a", "t", "p", null, createdAt = 1).target shouldBe null
     }
 
-    @Test fun targetAppIsDerivedNeverGiven() {
-        shouldThrow<IllegalArgumentException> { Shortcut("a", "t", null, "com.other", target = Target.App(club), createdAt = 1) }
-        shouldThrow<IllegalArgumentException> { Shortcut("a", "t", null, null, target = Target.App(club), createdAt = 1) }
-        shouldThrow<IllegalArgumentException> { Shortcut("a", "t", null, club, target = Target.Settings(SettingsPage.WIFI), createdAt = 1) }
-        Shortcut("a", "t", null, null, target = Target.Settings(SettingsPage.WIFI), createdAt = 1).app shouldBe null
-        Shortcut("a", "t", null, "com.google.android.apps.maps", target = Target.Link(LinkTemplate.MAPS_ROUTE, "Home"), createdAt = 1).app shouldBe "com.google.android.apps.maps"
+    @Test fun appIsDerivedFromTheTarget() {
+        val maps = "com.google.android.apps.maps"
+        // Construction: supplied value (null, or even a different package) never wins over the target.
+        Shortcut("a", "t", null, null, target = Target.App(club), createdAt = 1).app shouldBe club
+        Shortcut("a", "t", null, "com.other", target = Target.App(club), createdAt = 1).app shouldBe club
+        Shortcut("a", "t", null, null, target = Target.AppShortcut(club, "x"), createdAt = 1).app shouldBe club
+        Shortcut("a", "t", null, club, target = Target.Settings(SettingsPage.WIFI), createdAt = 1).app shouldBe null
+        Shortcut("a", "t", null, null, target = Target.Settings(SettingsPage.APP_DETAILS, club), createdAt = 1).app shouldBe null
+        Shortcut("a", "t", null, null, target = Target.Link(LinkTemplate.MAPS_ROUTE, "Home"), createdAt = 1).app shouldBe maps
+        Shortcut("a", "t", null, null, target = Target.Link(LinkTemplate.SPOTIFY_PAGE, "playlist:$id22"), createdAt = 1).app shouldBe "com.spotify.music"
+        // Changing the target through copy() re-derives the icon.
+        val first = Shortcut("a", "t", "p", club, target = Target.App(club), createdAt = 1)
+        first.copy(target = Target.App("com.example.other")).app shouldBe "com.example.other"
+        first.copy(target = Target.Settings(SettingsPage.SOUND)).app shouldBe null
+        first.copy(target = Target.Link(LinkTemplate.MAPS_ROUTE, "Work")).app shouldBe maps
+        // Without a target the supplied app is kept (prompt-only records).
+        Shortcut("a", "t", "p", club, createdAt = 1).app shouldBe club
+        first.copy(target = null).app shouldBe club
+        // A target makes the shortcut's identity the target's: same target, same app regardless of what was supplied.
+        Shortcut("a", "t", null, null, target = Target.App(club), createdAt = 1).app shouldBe Shortcut("a", "t", null, "x", target = Target.App(club), createdAt = 1).app
     }
 
     @Test fun legacyJsonWithoutTargetReads() {
@@ -164,6 +178,13 @@ class ShortcutRulesTest {
 
     @Test fun spotifyParserRejectsOtherHostsKindsAndIds() {
         listOf(
+            "https://open.spotify.com/playlist/%33${id22.drop(1)}",
+            "https://open.spotify.com/playlist/${id22.dropLast(2)}%41",
+            "https://open.spotify.com/playl%69st/$id22",
+            "https://open.spotify.com/playlist/${id22.dropLast(1)}\u00e9",
+            "https://open.spotify.com/playlist/${id22.dropLast(1)}\u0663",
+            "https://open.spotify.com/playlist/${id22.dropLast(1)}\uff21",
+            "https://open.spotify.com/playlist/\u0661${id22.drop(1)}",
             "http://open.spotify.com/playlist/$id22",
             "https://open.spotify.com.evil.com/playlist/$id22",
             "https://evil.com/open.spotify.com/playlist/$id22",

@@ -31,6 +31,7 @@ import com.misura.phone.shortcut.ShortcutStore
 import com.misura.phone.shortcut.ShortcutTargets
 import com.misura.phone.store.MisuraDb
 import com.misura.phone.store.RoomSessionStore
+import io.kotest.matchers.floats.plusOrMinus
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -263,6 +264,15 @@ class AppSheetHomeTest {
         count(hasText("Check in")) shouldBe 0 // the fake launcher is not consulted
         count(hasText("Add to Home")) shouldBe 0
         count(hasText("Pin")) shouldBe 1
+    }
+
+    @Test fun legacyMenuKeepsFullHeightScrollViewport() {
+        rule.setContent { MenuPopup(onDismiss = {}) { repeat(12) { MenuItem("Row $it") {} } } }
+        rule.waitUntil(8_000) { count(hasText("Row 0")) > 0 }
+        val dp = rule.activity.resources.displayMetrics.density
+        val scroller = rule.onNode(androidx.compose.ui.test.hasScrollAction()).fetchSemanticsNode().boundsInRoot
+        // Padding sits inside the scroll, so the viewport is the whole 360dp card (not 348dp inside 6dp gutters).
+        (scroller.height / dp) shouldBe (360f plusOrMinus .5f)
     }
 
     private fun runBlockingSeed(n: Int) = kotlinx.coroutines.runBlocking {

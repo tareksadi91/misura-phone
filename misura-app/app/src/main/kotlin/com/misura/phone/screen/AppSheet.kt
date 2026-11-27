@@ -330,12 +330,15 @@ internal fun MenuPopup(onDismiss: () -> Unit, footer: (@Composable androidx.comp
     } }
     val scroll = androidx.compose.foundation.rememberScrollState()
     Popup(popupPositionProvider = position, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
-        Column(Modifier.width((LocalConfiguration.current.screenWidthDp.dp - 88.dp).coerceAtLeast(160.dp))
+        val frame = Modifier.width((LocalConfiguration.current.screenWidthDp.dp - 88.dp).coerceAtLeast(160.dp))
             .heightIn(max = 360.dp).shadow(18.dp, RoundedCornerShape(14.dp)).background(M.surface, RoundedCornerShape(14.dp))
-            .padding(vertical = 6.dp)) {
+        if (footer == null) {
+            // The frozen legacy menu: scroll first, padding inside it (unchanged since before the Home shortcuts menu).
+            Column(frame.verticalScroll(scroll).padding(vertical = 6.dp), content = content)
+        } else Column(frame.padding(vertical = 6.dp)) {
             // Rows scroll; the footer (status) stays outside them, so it is never clipped out of the accessibility tree.
             Column(Modifier.weight(1f, fill = false).verticalScroll(scroll), content = content)
-            footer?.invoke(this)
+            footer.invoke(this)
         }
     }
 }

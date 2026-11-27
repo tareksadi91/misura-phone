@@ -178,7 +178,9 @@ private val NavSaver = Saver<Nav, String>(
 @Composable
 fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openRequest: OpenRequest?, sends: Sends? = null, homeTap: Long = 0, voice: com.misura.phone.voice.Voice? = null,
     apps: List<Pair<String, String>> = emptyList(), onOpenItem: ((ItemFact) -> Unit)? = null, appsProvider: () -> List<Pair<String, String>> = { apps }, onOpenSettings: (() -> Unit)? = null,
-    shortcutStore: com.misura.phone.shortcut.ShortcutStore? = null, openApp: (String) -> Unit = {}) {
+    shortcutStore: com.misura.phone.shortcut.ShortcutStore? = null, shortcutKeeper: com.misura.phone.shortcut.ShortcutKeeper? = null, openApp: (String) -> Unit = {}) {
+    // Every shortcut mutation goes through the keeper; a Home built with only a store (tests, previews) gets one with no pin work.
+    val keeper = shortcutKeeper ?: remember(shortcutStore) { shortcutStore?.let { com.misura.phone.shortcut.ShortcutKeeper(it, pins = null) } }
     var openId by rememberSaveable { mutableStateOf<String?>(null) }
     var nav by rememberSaveable(stateSaver = NavSaver) { mutableStateOf(Nav()) }
     var open by remember { mutableStateOf<Open?>(null) }
@@ -388,7 +390,7 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
                 }) {
                     if (!requestKeyboard) Home(rows, now, Modifier.fillMaxSize(), shortcuts, onShortcut = { startShortcut(it) }, onRemoveShortcut = { sc ->
                         // A failed write throws: the line springs back (SwipeTaskLine) and the shortcut stays kept.
-                        withContext(Dispatchers.IO) { shortcutStore?.remove(sc.id) }
+                        withContext(Dispatchers.IO) { keeper?.remove(sc.id) }
                         shortcuts = shortcuts.filter { it.id != sc.id }
                     }, onEarlier = { if (!sheet.searching) earlier = true }, onDismiss = { ids ->
                         if (!sheet.searching) { ids.map { agent.dismiss(it) }.forEach { it.await() }; rows = rows.map { if (it.id in ids) it.copy(fresh = false) else it } }

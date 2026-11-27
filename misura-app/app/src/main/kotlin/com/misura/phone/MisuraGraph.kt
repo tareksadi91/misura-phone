@@ -38,6 +38,8 @@ object MisuraGraph {
     lateinit var agent: Agent; private set
     /** Kept Home shortcuts: one store, shared by the shortcut tool and Home. */
     lateinit var shortcuts: com.misura.phone.shortcut.ShortcutStore; private set
+    /** The one owner of every shortcut mutation (store write + pins). */
+    lateinit var shortcutKeeper: com.misura.phone.shortcut.ShortcutKeeper; private set
     private lateinit var credentials: com.misura.phone.setup.CredentialSettings
     /** Place photos sized for the 3a's cards. */
     val photoLoader: com.misura.phone.screen.PhotoLoader = { place, photo ->
@@ -110,7 +112,9 @@ object MisuraGraph {
         val appLabel = { pkg: String -> runCatching { app.packageManager.getApplicationLabel(app.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg) }
         // Steps as Home shows them (a send follows its task), so only a confirmed send counts as a run that worked.
         shortcuts = com.misura.phone.shortcut.ShortcutStore(app)
-        val shortcutTool = com.misura.phone.shortcut.ShortcutTool(shortcuts,
+        // Task 3 passes the LauncherApps-backed pins here; null = the keeper does store work only, no pin changes.
+        shortcutKeeper = com.misura.phone.shortcut.ShortcutKeeper(shortcuts, pins = null)
+        val shortcutTool = com.misura.phone.shortcut.ShortcutTool(shortcuts, shortcutKeeper,
             com.misura.phone.shortcut.controllerSteps(sessions, tasks::load, controller::isChecking), appLabel)
         val gates = cardGates(calendar, routineTool, shortcutTool, useApp)
         agent = Agent(sessions, ConfiguredBrain, listOf(com.misura.phone.notify.ReadNotifications(app), places, lookup, com.misura.phone.brain.Remember(brainPrefs), useApp, com.misura.phone.hands.OpenApp(app, { apps }) { bringParked(it) }, calendar, com.misura.phone.hands.Contacts(app), com.misura.core.agent.Directions({ url -> openDirections(app, url) }), routineTool, shortcutTool), System::currentTimeMillis, scope, turnTimeoutMs = 300_000, callTimeoutMs = 60_000, // the call after a long app run carries its items and was timing out at 30 s on a slow evening

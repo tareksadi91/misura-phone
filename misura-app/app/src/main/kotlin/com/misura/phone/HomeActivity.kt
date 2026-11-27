@@ -43,7 +43,7 @@ class HomeActivity : ComponentActivity() {
         val g = MisuraGraph
         setContent {
             HomeScreen(g.agent, g.sessions, g.photoLoader, request, Sends(g.tasks, g.controller, g.scope), homeTap,
-                com.misura.phone.voice.AndroidVoice(this), appsProvider = { g.apps }, shortcutStore = g.shortcuts,
+                com.misura.phone.voice.AndroidVoice(this), appsProvider = { g.apps }, shortcutStore = g.shortcuts, shortcutKeeper = g.shortcutKeeper,
                 onOpenSettings = { startActivity(Intent(this, com.misura.phone.setup.SetupActivity::class.java)) }) { pkg ->
                 g.scope.launch {
                     if (g.bringParked(pkg)) com.misura.phone.store.Pins(this@HomeActivity).launched(pkg)

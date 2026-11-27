@@ -40,6 +40,7 @@ internal fun controllerSteps(sessions: SessionStore, task: suspend (String) -> T
  */
 class ShortcutTool(
     private val store: ShortcutStore,
+    private val keeper: ShortcutKeeper,
     private val steps: suspend (sessionId: String) -> List<Step>,
     private val appLabel: (String) -> String,
     private val gate: RoutineGate = RoutineGate(prefix = "sc"),
@@ -95,7 +96,7 @@ class ShortcutTool(
         val shownApp = appLabel(app) // read once: the digest and the card bind the same words
         val r = gate.act("keep", draft.digest(null, shownApp, null), session) {
             try {
-                when (store.keep(draft.copy(id = UUID.randomUUID().toString(), createdAt = clock()), null)) {
+                when (keeper.keep(draft.copy(id = UUID.randomUUID().toString(), createdAt = clock()), null) { true }) {
                     KeepResult.Kept -> "Kept: $title"
                     KeepResult.Duplicate -> "Not kept: it is already on Home"
                     KeepResult.Full, KeepResult.StaleReplacement, KeepResult.TargetChanged -> "Not kept: Home changed, ask again"
@@ -109,7 +110,7 @@ class ShortcutTool(
     private suspend fun remove(args: JsonObject): JsonObject {
         val s = args.s("id")?.let { id -> store.all().firstOrNull { it.id == id } } ?: return err("no shortcut with that id (call list first)")
         val r = gate.act("remove", s.id, coroutineContext[RunningFor]?.session) {
-            try { if (store.remove(s.id)) "Shortcut removed" else "Not removed: it was already gone" } catch (_: StorageUnavailableException) { STORAGE }
+            try { if (keeper.remove(s.id)) "Shortcut removed" else "Not removed: it was already gone" } catch (_: StorageUnavailableException) { STORAGE }
         }
         return card(r, "Shortcut · ${s.app?.let(appLabel) ?: "Home"}", "Remove this shortcut?", "“${s.title}”", "Remove")
     }

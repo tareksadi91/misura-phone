@@ -151,7 +151,7 @@ class ShortcutToolTest {
         ctx.getSharedPreferences("shortcuts", android.content.Context.MODE_PRIVATE).edit().clear().commit()
         ctx.getSharedPreferences("routines", android.content.Context.MODE_PRIVATE).edit().clear().commit()
         store = ShortcutStore(ctx); routines = RoutineStore(ctx)
-        tool = ShortcutTool(store, controllerSteps(sessions, tasks::load) { false }, { pkg -> if (pkg == "com.example.club") "Club" else pkg })
+        tool = ShortcutTool(store, ShortcutKeeper(store, null), controllerSteps(sessions, tasks::load) { false }, { pkg -> if (pkg == "com.example.club") "Club" else pkg })
         routineTool = RoutineTool(routines)
         otherTaps.clear()
         gates = CardGates(GateOwner({ id, _ -> otherTaps += id }, {}), GateOwner(routineTool::answered, routineTool::stopped, routineTool::outcome),
@@ -226,7 +226,7 @@ class ShortcutToolTest {
 
     @Test fun cardAndDigestUseOneAppLabelRead() = runBlocking<Unit> {
         var reads = 0
-        val flipping = ShortcutTool(store, controllerSteps(sessions, tasks::load) { false }, { reads += 1; "Club v$reads" })
+        val flipping = ShortcutTool(store, ShortcutKeeper(store, null), controllerSteps(sessions, tasks::load) { false }, { reads += 1; "Club v$reads" })
         val a = Agent(sessions, Script(worked, call("shortcut", add), text("Asked.")), listOf(hand, routineTool, flipping), System::currentTimeMillis, scope,
             onChoose = gates.onChoose, chooseNote = gates.chooseNote, onStopped = gates.onStopped)
         val s = settled(a.start("keep it as a shortcut"))

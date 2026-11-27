@@ -132,6 +132,7 @@ class AppSheetHomeTest {
         s.prompt shouldBe null
         pins.of(pkg) shouldBe setOf("a")
         count(hasText("App info")) shouldBe 1 // the menu stays open
+        waitFor(hasContentDescription(", shortcut", substring = true)) // with Home free, the new line shows under the open menu
     }
 
     @Test fun addAppToHome() {
@@ -226,7 +227,12 @@ class AppSheetHomeTest {
         waitFor(hasContentDescription("Open Book a class")); waitFor(hasContentDescription("Add Book a class to Home"))
         val open = rule.onNode(hasContentDescription("Open Check in")).fetchSemanticsNode()
         val toggle = rule.onNode(add).fetchSemanticsNode()
-        check(toggle.boundsInRoot.height >= open.boundsInRoot.height * 0.9f && toggle.boundsInRoot.width >= 40f)
+        check(toggle.boundsInRoot.height >= open.boundsInRoot.height * 0.9f)
+        // Both targets meet the 48dp minimum, measured in dp at this device's density.
+        val dp = rule.activity.resources.displayMetrics.density
+        listOf(open, toggle).forEach { n ->
+            check(n.boundsInRoot.height / dp >= 47.5f && n.boundsInRoot.width / dp >= 47.5f) { "touch target ${n.boundsInRoot.width / dp}x${n.boundsInRoot.height / dp} dp < 48dp" }
+        }
         check(open.id != toggle.id)
         (SemanticsProperties.ContentDescription in toggle.config) shouldBe true
     }
@@ -257,6 +263,36 @@ class AppSheetHomeTest {
         click(add)
         waitFor(remove); waitFor(hasContentDescription("Added to Home"))
         store.all().size shouldBe 1
+        // The four tasks keep Home's lines: the new shortcut really is hidden there, so the menu's own confirmation is the only one.
+        Thread.sleep(1_000); rule.waitForIdle() // past Home's next poll
+        count(hasText("App info")) shouldBe 1 // the menu is still up
+        count(hasContentDescription(", shortcut", substring = true)) shouldBe 0 // (with no tasks the same line shows: plusHomeKeepsPublishedShortcut)
+    }
+
+    /**
+     * Codex final P2: a store write is in progress (its lock held) while the owner long-presses an app. The UI thread never waits on
+     * it: the long-press returns at once, the menu is not up yet, and it appears once the write lets go.
+     */
+    @Test fun menuOpenNeverBlocksOnAStoreWrite() {
+        show()
+        rule.onRoot().performTouchInput { swipeDown(startY = height * .15f, endY = height * .7f) }
+        val row = notHomeLine("Club"); waitFor(row)
+        val lock = ShortcutStore::class.java.getDeclaredField("LOCK").apply { isAccessible = true }.get(null)!!
+        val holding = java.util.concurrent.CountDownLatch(1); val release = java.util.concurrent.CountDownLatch(1)
+        val writer = Thread { synchronized(lock) { holding.countDown(); release.await(4, java.util.concurrent.TimeUnit.SECONDS) } }.apply { start() }
+        try {
+            check(holding.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            val t0 = android.os.SystemClock.uptimeMillis()
+            rule.onNode(row).performTouchInput { longClick() }
+            val took = android.os.SystemClock.uptimeMillis() - t0
+            // The main thread still answers while the write holds the lock.
+            val probe = java.util.concurrent.CountDownLatch(1)
+            android.os.Handler(android.os.Looper.getMainLooper()).post { probe.countDown() }
+            check(probe.await(1, java.util.concurrent.TimeUnit.SECONDS)) { "main thread blocked" }
+            check(took < 2_500) { "long-press blocked the UI for $took ms" }
+            count(hasText("App info")) shouldBe 0 // not opened under the held lock
+        } finally { release.countDown(); writer.join(5_000) }
+        waitFor(hasText("App info")); waitFor(add)
     }
 
     @Test fun noHomeInjectedKeepsMenuUnchanged() {

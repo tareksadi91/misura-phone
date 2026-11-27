@@ -104,6 +104,10 @@ fun AppSheet(state: AppSheetState, rows: SheetRows, openApp: (String) -> Unit, m
     var held by remember { mutableStateOf<String?>(null) }
     var shortcuts by remember { mutableStateOf<List<MenuShortcut>>(emptyList()) }
     var keptAtOpen by remember { mutableStateOf<List<com.misura.core.shortcut.Shortcut>>(emptyList()) }
+    // A long-press reads the launcher and the kept list off the main thread (the store shares its lock with synchronous writes,
+    // Codex final P2); the menu opens on Main only if the same row is still held by the newest hold.
+    val holdScope = androidx.compose.runtime.rememberCoroutineScope { kotlinx.coroutines.Dispatchers.Main }
+    val holdCount = remember { object { var n = 0 } }
     val entries = rows.entries
     val highlightedKey = entries.firstOrNull()?.key.takeIf { state.typed.isNotBlank() }
     val config = LocalViewConfiguration.current
@@ -111,7 +115,7 @@ fun AppSheet(state: AppSheetState, rows: SheetRows, openApp: (String) -> Unit, m
     val statusBars = WindowInsets.statusBars
     val windowTop = remember { object { var y = 0f } }
     BackHandler(state.engaged || state.searching) { state.close() }
-    LaunchedEffect(state.typed, state.searching) { held = null; state.menuOpen = false }
+    LaunchedEffect(state.typed, state.searching) { holdCount.n++; held = null; state.menuOpen = false }
     LaunchedEffect(state.typed) { state.list.scrollToItem(0) }
     val keyboardScroll = remember(state) { object : NestedScrollConnection {
         override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -160,8 +164,13 @@ fun AppSheet(state: AppSheetState, rows: SheetRows, openApp: (String) -> Unit, m
                                     held = state.menuOpen && held == entry.key,
                                     onOpen = { launchSheetEntry(context, state, entry, openApp) },
                                     onHold = {
-                                        held = entry.key; shortcuts = appShortcuts(context, entry.pkg, home)
-                                        keptAtOpen = home?.let { runCatching { it.store.all() }.getOrDefault(emptyList()) }.orEmpty(); state.menuOpen = true
+                                        val key = entry.key; val n = ++holdCount.n; held = key
+                                        holdScope.launch {
+                                            val (found, kept) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                appShortcuts(context, entry.pkg, home) to home?.let { runCatching { it.store.all() }.getOrDefault(emptyList()) }.orEmpty()
+                                            }
+                                            if (holdCount.n == n && held == key) { shortcuts = found; keptAtOpen = kept; state.menuOpen = true }
+                                        }
                                     })
                                 if (state.menuOpen && held == entry.key) {
                                     val pinned = state.pins.any { it.key == entry.key }

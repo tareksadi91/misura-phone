@@ -196,6 +196,9 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
     var shortcuts by remember { mutableStateOf<List<com.misura.core.shortcut.Shortcut>>(emptyList()) }
     // A tapped shortcut is starting its task: a second tap before the task screen opens starts nothing.
     var startingShortcut by remember { mutableStateOf(false) }
+    // Bumped by every submission and every change of what is in front: a shortcut whose open fails late falls back to its saved
+    // words only if nothing newer happened while it waited (Codex final P2: a hidden-display handoff can suspend the open).
+    val navEpoch = remember { java.util.concurrent.atomic.AtomicInteger() }
     // A direct open returns while Home may still be resumed: a second tap inside the double-tap window after a successful open opens nothing.
     var directUntil by remember { mutableLongStateOf(0L) }
     // The shortcut line that shows an inline failure (id to its text), and the one whose long-press menu is open.
@@ -277,6 +280,7 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
     LaunchedEffect(plainHome, homeTap, openRequest) { if (sheet.engaged || sheet.searching) sheet.close() }
 
     LaunchedEffect(openRequest) { openRequest?.let { openId = it.sessionId; nav = Nav() } }
+    LaunchedEffect(openId, earlier) { navEpoch.incrementAndGet() }
     LaunchedEffect(openId) {
         var lastPlaces: List<String>? = null
         val continued = mutableSetOf<String>()
@@ -337,12 +341,16 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
     fun startShortcut(sc: com.misura.core.shortcut.Shortcut) {
         if (startingShortcut || android.os.SystemClock.uptimeMillis() < directUntil || sheet.moving || sheet.engaged || sheet.searching || openId != null) return
         startingShortcut = true; lineNote = null
+        val epoch = navEpoch.get()
         scope.launch {
             try {
                 val target = sc.target
                 if (target != null) {
                     val opened = try { withContext(Dispatchers.IO) { openTarget(target) } } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { false }
+                    // Something newer was asked or opened while the open waited: the late answer starts nothing and notes nothing.
+                    val current = navEpoch.get() == epoch && openId == null && !earlier
                     if (opened) directUntil = android.os.SystemClock.uptimeMillis() + android.view.ViewConfiguration.getDoubleTapTimeout()
+                    else if (!current) return@launch
                     // A target that will not open falls back to the saved words when there are some; otherwise the line says so and stays.
                     else if (sc.prompt == null) { lineNote = sc.id to "Couldn't open. Try again."; return@launch }
                     if (!opened) startTask(sc.prompt!!, com.misura.core.agent.TurnOrigin.SHORTCUT)
@@ -573,6 +581,7 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
             // Typed or spoken, words go the same way. Words on a finished task start a new one: there's no card in front to talk to.
             fun submit(t: String, note: Looking?) {
                 val id = openId
+                navEpoch.incrementAndGet()
                 scope.launch {
                     if (id == null || cleared || finished) startTask(t, com.misura.core.agent.TurnOrigin.OWNER)
                     else agent.followUp(id, t, note)

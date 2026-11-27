@@ -185,7 +185,9 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
     /** Opens a shortcut's direct target (MisuraGraph.openTarget); false = it did not open. Never throws. */
     openTarget: suspend (com.misura.core.shortcut.Target) -> Boolean = { false },
     /** The app list's Home items ("+ Home", "Add to Home"); null = none. */
-    sheetHome: com.misura.phone.screen.SheetHome? = null, openApp: (String) -> Unit = {}) {
+    sheetHome: com.misura.phone.screen.SheetHome? = null,
+    /** Home's navigation counter; the activity passes its own so an arriving intent bumps it synchronously. Null = Home keeps one. */
+    navEpoch: java.util.concurrent.atomic.AtomicInteger? = null, openApp: (String) -> Unit = {}) {
     // Every shortcut mutation goes through the keeper; a Home built with only a store (tests, previews) gets one with no pin work.
     val keeper = shortcutKeeper ?: remember(shortcutStore) { shortcutStore?.let { com.misura.phone.shortcut.ShortcutKeeper(it, pins = null) } }
     var openId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -198,7 +200,7 @@ fun HomeScreen(agent: Agent, sessions: SessionStore, photos: PhotoLoader?, openR
     var startingShortcut by remember { mutableStateOf(false) }
     // Bumped by every submission and every change of what is in front: a shortcut whose open fails late falls back to its saved
     // words only if nothing newer happened while it waited (Codex final P2: a hidden-display handoff can suspend the open).
-    val navEpoch = remember { java.util.concurrent.atomic.AtomicInteger() }
+    val navEpoch = navEpoch ?: remember { java.util.concurrent.atomic.AtomicInteger() }
     // A direct open returns while Home may still be resumed: a second tap inside the double-tap window after a successful open opens nothing.
     var directUntil by remember { mutableLongStateOf(0L) }
     // The shortcut line that shows an inline failure (id to its text), and the one whose long-press menu is open.

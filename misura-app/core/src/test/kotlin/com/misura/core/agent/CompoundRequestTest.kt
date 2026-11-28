@@ -28,7 +28,7 @@ class CompoundRequestTest {
         val contacts = FakeTool(ToolSpec("contacts", "read address book", obj())) { obj("people" to JsonArray(emptyList())) }
         val store = InMemorySessionStore()
         val agent = Agent(store, brain, listOf(FakeTool(ToolSpec("find_places", "find places", obj())) { found }, contacts), { 0 }, this)
-        val id = agent.start("Find a café and tell FriendA and FriendB to meet there")
+        val id = agent.start("Find a café and tell FriendA and FriendB to meet there", TurnOrigin.OWNER)
         advanceUntilIdle()
         store.load(id)!!.status shouldBe SessionStatus.IDLE
         store.load(id)!!.places shouldBe Places(listOf("cafe"), "cafe")
@@ -42,7 +42,7 @@ class CompoundRequestTest {
         val tool = FakeTool(ToolSpec("effect", "action", obj())) { obj("ok" to JsonPrimitive(true)) }
         val store = InMemorySessionStore()
         val agent = Agent(store, ScriptedBrain(call("effect"), call("effect")), listOf(tool), { 0 }, this, maxCalls = 1)
-        val id = agent.start("Do something")
+        val id = agent.start("Do something", TurnOrigin.OWNER)
         advanceUntilIdle()
         tool.runs shouldBe 1
         store.load(id)!!.status shouldBe SessionStatus.FAILED
@@ -54,7 +54,7 @@ class CompoundRequestTest {
         val brain = ScriptedBrain(Calls(listOf(Triple("find_places", obj(), "search"), Triple("show_places", show, "display"))), call("show_places", show))
         val store = InMemorySessionStore()
         val agent = Agent(store, brain, listOf(tool), { 0 }, this, maxCalls = 1)
-        val id = agent.start("Find a café")
+        val id = agent.start("Find a café", TurnOrigin.OWNER)
         advanceUntilIdle()
         tool.runs shouldBe 1
         brain.seen.size shouldBe 2
@@ -69,7 +69,7 @@ class CompoundRequestTest {
         val brain = ScriptedBrain(call("find_places"), call("show_places", obj("placeIds" to JsonArray(listOf(JsonPrimitive("invented"))))))
         val tool = FakeTool(ToolSpec("find_places", "find places", obj())) { found }
         val agent = Agent(store, brain, listOf(tool), { 0 }, this, maxCalls = 1)
-        val id = agent.start("Find a café")
+        val id = agent.start("Find a café", TurnOrigin.OWNER)
         advanceUntilIdle()
         brain.seen.size shouldBe 2
         store.load(id)!!.status shouldBe SessionStatus.FAILED
@@ -88,7 +88,7 @@ class CompoundRequestTest {
         val brain = ScriptedBrain(Calls(listOf(draft("FriendA"), draft("FriendB"))), Calls(listOf(draft("FriendB"))))
         val store = InMemorySessionStore()
         val agent = Agent(store, brain, emptyList(), { 0 }, this, drafter = drafter, maxCalls = 1)
-        val id = agent.start("Tell FriendA and FriendB to meet at Test Café")
+        val id = agent.start("Tell FriendA and FriendB to meet at Test Café", TurnOrigin.OWNER)
         advanceUntilIdle()
         drafted shouldBe listOf("FriendA")
         (store.load(id)!!.say as Say.Approve).more shouldBe true
@@ -109,7 +109,7 @@ class CompoundRequestTest {
         )), call("ask", question))
         val store = InMemorySessionStore()
         val agent = Agent(store, brain, listOf(FakeTool(ToolSpec("find_places", "find places", obj())) { found }), { 0 }, this, drafter = drafter)
-        val id = agent.start("Find a café and tell FriendA and FriendB to meet there")
+        val id = agent.start("Find a café and tell FriendA and FriendB to meet there", TurnOrigin.OWNER)
         advanceUntilIdle()
         brain.seen.size shouldBe 3
         store.load(id)!!.status shouldBe SessionStatus.IDLE
@@ -130,7 +130,7 @@ class CompoundRequestTest {
         val brain = ScriptedBrain(call("find_places"), Calls(listOf(draft("FriendA"), draft("FriendB"))), call("show_places", show))
         val store = InMemorySessionStore()
         val agent = Agent(store, brain, listOf(FakeTool(ToolSpec("find_places", "find places", obj())) { found }), { 0 }, this, drafter = drafter)
-        val id = agent.start("Find a café, tell FriendA and FriendB, then show me the café")
+        val id = agent.start("Find a café, tell FriendA and FriendB, then show me the café", TurnOrigin.OWNER)
         advanceUntilIdle()
         drafted shouldBe listOf("FriendA", "FriendB")
         (store.load(id)!!.say as Say.Approve).all shouldBe listOf("FriendA", "FriendB")
@@ -161,7 +161,7 @@ class CompoundRequestTest {
         val brain = ScriptedBrain(call("find_places"), Calls(listOf(draft("FriendA"), draft("FriendB"))), call("use_app"), Calls(listOf(draft("FriendB"))))
         val store = InMemorySessionStore()
         val agent = Agent(store, brain, listOf(FakeTool(ToolSpec("find_places", "find places", obj())) { found }, discovery), { 0 }, this, drafter = drafter)
-        val id = agent.start("Find a café and tell FriendA and FriendB to meet there")
+        val id = agent.start("Find a café and tell FriendA and FriendB to meet there", TurnOrigin.OWNER)
         advanceUntilIdle()
         (store.load(id)!!.say as Say.Approve).more shouldBe true
         discovery.runs shouldBe 0

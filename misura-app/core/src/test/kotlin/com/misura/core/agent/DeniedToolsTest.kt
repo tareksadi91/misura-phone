@@ -18,7 +18,7 @@ class DeniedToolsTest {
         }
         val store = InMemorySessionStore()
         val agent = Agent(store, brain, listOf(hand), { testScheduler.currentTime }, this)
-        val restricted = agent.start("x", deny = setOf("use_app")); advanceUntilIdle()
+        val restricted = agent.start("x", TurnOrigin.OWNER, deny = setOf("use_app")); advanceUntilIdle()
         hand.runs shouldBe 0
         ("use_app" in seen[0]) shouldBe false
         store.turns(restricted).toString() shouldContain "tool unavailable this turn"

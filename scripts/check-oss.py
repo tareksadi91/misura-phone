@@ -39,6 +39,12 @@ IDENTIFIER_WORD_LIMIT = 8
 # Reviewed complete source lines, including DEBUG guards for content-bearing logs.
 # New/changed logging needs review; this is a finite sink check, not Kotlin dataflow analysis.
 REVIEWED_LOG_LINES = {
+    # Pin changes of the shortcut keeper: fixed sentences and an exception class name, no shortcut or app names (27 Nov).
+    "misura-app/app/src/main/kotlin/com/misura/phone/shortcut/ShortcutKeeper.kt": {
+        "493d68c23518890b991ba4082eda7ab894791c735707732635ebcf867c86640e",
+        "a86302ee2165717f0edb49bbf3456e70c09ff516fbbfcde62ad14ca8c7fef6fe",
+        "a9ebeb379e369f73da587dbf821b1349889e841737adad5d808b0ae506849b11",
+    },
     # A lost gesture answer: a fixed sentence and a duration, no screen words (26 Nov).
     "misura-app/app/src/main/kotlin/com/misura/phone/hidden/HiddenInput.kt": {
         "2498a05851b5b30cd4c56717d2bc217adad8a105a459b4d61b78010efb9ddef1",

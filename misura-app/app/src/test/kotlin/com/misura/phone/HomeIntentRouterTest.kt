@@ -37,7 +37,7 @@ class HomeIntentRouterTest {
         assertEquals(intent.component, delivered.component)
         assertEquals("Aa", delivered.getStringExtra("task"))
         val opened = mutableListOf<String?>()
-        val router = HomeIntentRouter(this, { "session-$it" }, opened::add)
+        val router = HomeIntentRouter(this, { "session-$it" }, open = opened::add)
         router.follow(delivered)
         assertEquals("Aa", router.pendingTask)
         runCurrent()
@@ -50,7 +50,7 @@ class HomeIntentRouterTest {
     @Test fun newerTapAndHomeWinOverSlowLookupAndMissingTaskReturnsHome() = runTest {
         val late = CompletableDeferred<String?>()
         val opened = mutableListOf<String?>()
-        val router = HomeIntentRouter(this, { if (it == "slow") withContext(NonCancellable) { late.await() } else null }, opened::add)
+        val router = HomeIntentRouter(this, { if (it == "slow") withContext(NonCancellable) { late.await() } else null }, open = opened::add)
         router.follow(Intent().putExtra("task", "slow")); runCurrent()
         assertEquals("slow", router.pendingTask)
         router.follow(Intent().putExtra("session", "new"))
@@ -60,10 +60,24 @@ class HomeIntentRouterTest {
         router.follow(Intent().putExtra("task", "missing")); runCurrent()
         assertEquals(listOf("new", null), opened)
         val pending = CompletableDeferred<String?>()
-        val homeRouter = HomeIntentRouter(this, { withContext(NonCancellable) { pending.await() } }, opened::add)
+        val homeRouter = HomeIntentRouter(this, { withContext(NonCancellable) { pending.await() } }, open = opened::add)
         homeRouter.follow(Intent().putExtra("task", "slow")); runCurrent()
         homeRouter.follow(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME))
         pending.complete("late"); runCurrent()
         assertEquals(listOf("new", null, null), opened)
+    }
+
+    /** Codex final re-check 2: a Home, session or task intent counts as navigation at once, before a task lookup suspends; other intents don't. */
+    @Test fun arrivalIsReportedSynchronouslyBeforeAnyLookup() = runTest {
+        var received = 0
+        val pending = CompletableDeferred<String?>()
+        val opened = mutableListOf<String?>()
+        val router = HomeIntentRouter(this, { withContext(NonCancellable) { pending.await() } }, received = { received++ }, open = opened::add)
+        router.follow(Intent().putExtra("task", "slow"))
+        assertEquals(1, received); assertEquals(emptyList<String?>(), opened) // reported before the lookup ran
+        router.follow(Intent().putExtra("session", "s")); assertEquals(2, received)
+        router.follow(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)); assertEquals(3, received)
+        router.follow(Intent(Intent.ACTION_MAIN)); assertEquals(3, received) // not navigation
+        pending.complete(null); runCurrent()
     }
 }

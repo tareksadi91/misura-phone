@@ -35,7 +35,7 @@ class DraftTest {
     @Test fun draftShowsApproveCardWithAWillStep() = runTest {
         val d = FakeDrafter()
         val (store, agent) = agent(ScriptedBrain(draftCall("FriendA", "There in 5")), d)
-        val id = agent.start("tell FriendA we'll be there in 5"); advanceUntilIdle()
+        val id = agent.start("tell FriendA we'll be there in 5", TurnOrigin.OWNER); advanceUntilIdle()
         val s = store.load(id)!!
         s.say shouldBe Say.Approve("task-1", "FriendA", "Testchat")
         s.status shouldBe SessionStatus.IDLE
@@ -46,7 +46,7 @@ class DraftTest {
     @Test fun unknownChatGoesBackToTheModelWithTheChatsItCanUse() = runTest {
         val brain = ScriptedBrain(draftCall("Host", "hi"), call("ask", obj("line" to JsonPrimitive("Who's Host?"))))
         val (store, agent) = agent(brain, FakeDrafter())
-        val id = agent.start("text Host"); advanceUntilIdle()
+        val id = agent.start("text Host", TurnOrigin.OWNER); advanceUntilIdle()
         store.load(id)!!.say.shouldBeInstanceOf<Say.Question>()
         val response = brain.seen[1].last().content["parts"]!!.jsonArray[0].jsonObject["functionResponse"]!!.jsonObject["response"]!!.jsonObject
         response["error"]!!.jsonPrimitive.content shouldContain "FriendA"
@@ -72,7 +72,7 @@ class DraftTest {
             }
         }
         val (_, agent) = agent(brain, drafter)
-        agent.start("message Friend on Chat: hi"); advanceUntilIdle()
+        agent.start("message Friend on Chat: hi", TurnOrigin.OWNER); advanceUntilIdle()
         drafted shouldBe listOf(Triple("Friend", "hi", "chat.expected"))
         offered!!.parameters["properties"]!!.jsonObject["app"]!!.jsonObject["type"]!!.jsonPrimitive.content shouldBe "STRING"
         offered!!.parameters["required"]!!.jsonArray.map { it.jsonPrimitive.content } shouldBe listOf("to", "text")
@@ -91,7 +91,7 @@ class DraftTest {
             }
             val brain = ScriptedBrain(call(DRAFT_MESSAGE, obj("to" to JsonPrimitive("Friend"), "text" to JsonPrimitive("hi"), "app" to app)), text("Which app?"))
             val (store, agent) = agent(brain, drafter)
-            val id = agent.start("message Friend on Chat: hi"); advanceUntilIdle()
+            val id = agent.start("message Friend on Chat: hi", TurnOrigin.OWNER); advanceUntilIdle()
             drafted shouldBe emptyList()
             store.load(id)!!.say shouldBe Say.Answer("Which app?")
         }
@@ -102,7 +102,7 @@ class DraftTest {
         fun two(a: String, b: String) = Calls(listOf(Triple(DRAFT_MESSAGE, obj("to" to JsonPrimitive("NeighborB"), "text" to JsonPrimitive(a)), "c1"), Triple(DRAFT_MESSAGE, obj("to" to JsonPrimitive("Guest"), "text" to JsonPrimitive(b)), "c2")))
         val brain = ScriptedBrain(two("Dinner at 8", "Dinner at 8"), two("Dinner at 9", "Dinner at 9"), text("Done."))
         val (store, agent) = agent(brain, d)
-        val id = agent.start("tell NeighborB and Guest dinner is at 8"); advanceUntilIdle()
+        val id = agent.start("tell NeighborB and Guest dinner is at 8", TurnOrigin.OWNER); advanceUntilIdle()
         // One card, both messages, each its own send task.
         store.load(id)!!.say shouldBe Say.Approve("task-1", "NeighborB", "Testchat", also = listOf(Say.Also("task-2", "Guest")))
         (store.load(id)!!.say as Say.Approve).all shouldBe listOf("task-1", "task-2")
@@ -119,16 +119,16 @@ class DraftTest {
     @Test fun withoutADrafterTheToolIsNotOffered() = runTest {
         var offered: List<String> = emptyList()
         val brain = object : Brain { override suspend fun next(system: String, turns: List<Turn>, tools: List<ToolSpec>): BrainReply { offered = tools.map { it.name }; return text("ok")() } }
-        val (_, agent) = agent(brain, null); agent.start("hi"); advanceUntilIdle()
+        val (_, agent) = agent(brain, null); agent.start("hi", TurnOrigin.OWNER); advanceUntilIdle()
         offered.contains(DRAFT_MESSAGE) shouldBe false
-        val (_, agent2) = agent(brain, FakeDrafter()); agent2.start("hi"); advanceUntilIdle()
+        val (_, agent2) = agent(brain, FakeDrafter()); agent2.start("hi", TurnOrigin.OWNER); advanceUntilIdle()
         offered shouldContain DRAFT_MESSAGE
     }
 
     @Test fun redraftDiscardsTheReplacedDraft() = runTest {
         val d = FakeDrafter()
         val (store, agent) = agent(ScriptedBrain(draftCall("FriendA", "There in 5"), draftCall("FriendA", "Running late")), d)
-        val id = agent.start("tell FriendA"); advanceUntilIdle()
+        val id = agent.start("tell FriendA", TurnOrigin.OWNER); advanceUntilIdle()
         agent.followUp(id, "say I'm late"); advanceUntilIdle()
         d.discarded shouldBe listOf("task-1")
         (store.load(id)!!.say as Say.Approve).taskId shouldBe "task-2"
@@ -165,7 +165,7 @@ class DraftTest {
         val d = FakeDrafter(mapOf("neighborb" to "NeighborB", "guest" to "Guest"))
         val brain = ScriptedBrain(draftMore("NeighborB", "hi"), draftCall("Guest", "hi"))
         val (store, agent) = agent(brain, d)
-        val id = agent.start("say hi to NeighborB and Guest"); advanceUntilIdle()
+        val id = agent.start("say hi to NeighborB and Guest", TurnOrigin.OWNER); advanceUntilIdle()
         store.load(id)!!.say shouldBe Say.Approve("task-1", "NeighborB", "Testchat", more = true)
 
         agent.sent(id, "nope"); advanceUntilIdle() // not the draft on the card: nothing happens
@@ -184,7 +184,7 @@ class DraftTest {
     @Test fun aProblemFurtherDownAListNeverSaysNothingWasSent() = runTest {
         val brain = ScriptedBrain(draftMore("NeighborB", "hi"), { throw BrainError("x", code = "400") })
         val (store, agent) = agent(brain, FakeDrafter(mapOf("neighborb" to "NeighborB")))
-        val id = agent.start("say hi to NeighborB and Guest"); advanceUntilIdle()
+        val id = agent.start("say hi to NeighborB and Guest", TurnOrigin.OWNER); advanceUntilIdle()
         agent.sent(id, "task-1"); advanceUntilIdle()
         (store.load(id)!!.say as Say.Problem).line shouldBe "Misura can't reach the model (400). The rest is still to do."
     }
@@ -192,7 +192,7 @@ class DraftTest {
     @Test fun tryAgainAfterAFailedSendDownAListSaysItDidNotGoOut() = runTest {
         val brain = ScriptedBrain(draftMore("NeighborB", "hi"), draftCall("Guest", "hi"), draftCall("Guest", "hi"))
         val (store, agent) = agent(brain, FakeDrafter(mapOf("neighborb" to "NeighborB", "guest" to "Guest")))
-        val id = agent.start("say hi to NeighborB and Guest"); advanceUntilIdle()
+        val id = agent.start("say hi to NeighborB and Guest", TurnOrigin.OWNER); advanceUntilIdle()
         agent.sent(id, "task-1"); advanceUntilIdle()
         agent.retry(id); advanceUntilIdle() // Guest's send failed; the card's Try again
         val heard = store.turns(id).last { it.role == "user" && it.content["parts"]!!.jsonArray[0].jsonObject.containsKey("text") }
@@ -203,7 +203,7 @@ class DraftTest {
     @Test fun aConfirmedSendMovesItsListOnWithoutTheScreen() = runTest {
         val brain = ScriptedBrain(draftMore("NeighborB", "hi"), draftCall("Guest", "hi"))
         val (store, agent) = agent(brain, FakeDrafter(mapOf("neighborb" to "NeighborB", "guest" to "Guest")))
-        val id = agent.start("say hi to NeighborB and Guest"); advanceUntilIdle()
+        val id = agent.start("say hi to NeighborB and Guest", TurnOrigin.OWNER); advanceUntilIdle()
         agent.taskSent("someone-else"); advanceUntilIdle()
         brain.seen.size shouldBe 1
         agent.taskSent("task-1"); advanceUntilIdle()
@@ -215,7 +215,7 @@ class DraftTest {
         val brain = ScriptedBrain(call("slow"), text("Stopped."))
         val store = InMemorySessionStore()
         val agent = Agent(store, brain, listOf(slow), { testScheduler.currentTime }, this)
-        val id = agent.start("look it up"); testScheduler.advanceTimeBy(1_000); testScheduler.runCurrent()
+        val id = agent.start("look it up", TurnOrigin.OWNER); testScheduler.advanceTimeBy(1_000); testScheduler.runCurrent()
         store.load(id)!!.steps.single().state shouldBe StepState.RUNNING
         agent.followUp(id, "stop"); advanceUntilIdle()
         val s = store.load(id)!!
@@ -235,7 +235,7 @@ class DraftTest {
         val brain = ScriptedBrain(draftMore("NeighborB", "hi"), { gate.await(); text("never")() }, text("Stopped."))
         val store = InMemorySessionStore()
         val agent = Agent(store, brain, emptyList(), { testScheduler.currentTime }, this, drafter = FakeDrafter(mapOf("neighborb" to "NeighborB")), onStopped = { stopped++ })
-        val id = agent.start("say hi to NeighborB and Guest"); advanceUntilIdle()
+        val id = agent.start("say hi to NeighborB and Guest", TurnOrigin.OWNER); advanceUntilIdle()
         agent.taskSent("task-1"); agent.sent(id, "task-1"); testScheduler.runCurrent() // controller and screen both report it
         agent.followUp(id, "stop"); advanceUntilIdle()
         brain.seen.size shouldBe 3 // draft, the one carry-on (stopped), then "stop": the second report never ran

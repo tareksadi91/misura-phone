@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Process
 import android.provider.Settings
 import android.widget.Toast
+import kotlinx.coroutines.launch
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -89,17 +90,24 @@ import com.misura.phone.cards.ST
 
 /** Keep query and stored-row reads out of HomeScreen's composition scope. */
 @Composable
-fun AppSheet(state: AppSheetState, apps: List<Pair<String, String>>, openApp: (String) -> Unit, modifier: Modifier = Modifier, onSettings: (() -> Unit)? = null) {
+fun AppSheet(state: AppSheetState, apps: List<Pair<String, String>>, openApp: (String) -> Unit, modifier: Modifier = Modifier, onSettings: (() -> Unit)? = null,
+    home: SheetHome? = null) {
     val rows = remember(apps, state.pins, state.counts, state.typed) { sheetRows(apps, state.pins, state.counts, state.typed) }
-    AppSheet(state, rows, openApp, modifier, onSettings)
+    AppSheet(state, rows, openApp, modifier, onSettings, home)
 }
 
 /** Reverse list: first pin is closest to the shared field, most-used app closest to Pinned. */
 @Composable
-fun AppSheet(state: AppSheetState, rows: SheetRows, openApp: (String) -> Unit, modifier: Modifier = Modifier, onSettings: (() -> Unit)? = null) {
+fun AppSheet(state: AppSheetState, rows: SheetRows, openApp: (String) -> Unit, modifier: Modifier = Modifier, onSettings: (() -> Unit)? = null,
+    home: SheetHome? = null) {
     val context = LocalContext.current
     var held by remember { mutableStateOf<String?>(null) }
-    var shortcuts by remember { mutableStateOf<List<ShortcutInfo>>(emptyList()) }
+    var shortcuts by remember { mutableStateOf<List<MenuShortcut>>(emptyList()) }
+    var keptAtOpen by remember { mutableStateOf<List<com.misura.core.shortcut.Shortcut>>(emptyList()) }
+    // A long-press reads the launcher and the kept list off the main thread (the store shares its lock with synchronous writes,
+    // Codex final P2); the menu opens on Main only if the same row is still held by the newest hold.
+    val holdScope = androidx.compose.runtime.rememberCoroutineScope { kotlinx.coroutines.Dispatchers.Main }
+    val holdCount = remember { object { var n = 0 } }
     val entries = rows.entries
     val highlightedKey = entries.firstOrNull()?.key.takeIf { state.typed.isNotBlank() }
     val config = LocalViewConfiguration.current
@@ -107,7 +115,7 @@ fun AppSheet(state: AppSheetState, rows: SheetRows, openApp: (String) -> Unit, m
     val statusBars = WindowInsets.statusBars
     val windowTop = remember { object { var y = 0f } }
     BackHandler(state.engaged || state.searching) { state.close() }
-    LaunchedEffect(state.typed, state.searching) { held = null; state.menuOpen = false }
+    LaunchedEffect(state.typed, state.searching) { holdCount.n++; held = null; state.menuOpen = false }
     LaunchedEffect(state.typed) { state.list.scrollToItem(0) }
     val keyboardScroll = remember(state) { object : NestedScrollConnection {
         override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -156,14 +164,20 @@ fun AppSheet(state: AppSheetState, rows: SheetRows, openApp: (String) -> Unit, m
                                     held = state.menuOpen && held == entry.key,
                                     onOpen = { launchSheetEntry(context, state, entry, openApp) },
                                     onHold = {
-                                        held = entry.key; shortcuts = appShortcuts(context, entry.pkg); state.menuOpen = true
+                                        val key = entry.key; val n = ++holdCount.n; held = key
+                                        holdScope.launch {
+                                            val (found, kept) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                appShortcuts(context, entry.pkg, home) to home?.let { runCatching { it.store.all() }.getOrDefault(emptyList()) }.orEmpty()
+                                            }
+                                            if (holdCount.n == n && held == key) { shortcuts = found; keptAtOpen = kept; state.menuOpen = true }
+                                        }
                                     })
                                 if (state.menuOpen && held == entry.key) {
                                     val pinned = state.pins.any { it.key == entry.key }
-                                    AppMenu(entry, shortcuts, pinned, onDismiss = { state.menuOpen = false },
+                                    AppMenu(entry, shortcuts, pinned, home, keptAtOpen, onDismiss = { state.menuOpen = false },
                                         onShortcut = { shortcut ->
                                             launchSheetEntry(context, state, entry.copy(shortcutId = shortcut.id,
-                                                shortcutLabel = shortcut.shortLabel?.toString()), openApp)
+                                                shortcutLabel = shortcut.label), openApp)
                                         }, onPin = { state.togglePin(entry); state.menuOpen = false })
                                 }
                             }
@@ -249,45 +263,58 @@ private fun AppSheetRow(entry: SheetEntry, highlighted: Boolean, held: Boolean, 
     }
 }
 
-private fun appShortcuts(context: Context, pkg: String): List<ShortcutInfo> = runCatching {
-    val launcher = context.getSystemService(LauncherApps::class.java) ?: return@runCatching emptyList()
-    if (!launcher.hasShortcutHostPermission()) return@runCatching emptyList()
-    val query = LauncherApps.ShortcutQuery().setPackage(pkg).setQueryFlags(
-        LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED)
-    launcher.getShortcuts(query, Process.myUserHandle()).orEmpty().filter { it.isEnabled }.distinctBy { it.id }.sortedBy { it.rank }
-}.getOrDefault(emptyList())
+/** The app's own shortcuts for its menu. With Home injected they come from the launcher's published list (sanitized labels, enabled only), the same list "+ Home" validates against. */
+private fun appShortcuts(context: Context, pkg: String, home: SheetHome?): List<MenuShortcut> =
+    if (home != null) home.publishedFor(pkg) else runCatching {
+        val launcher = context.getSystemService(LauncherApps::class.java) ?: return@runCatching emptyList()
+        if (!launcher.hasShortcutHostPermission()) return@runCatching emptyList()
+        val query = LauncherApps.ShortcutQuery().setPackage(pkg).setQueryFlags(
+            LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED)
+        launcher.getShortcuts(query, Process.myUserHandle()).orEmpty().filter { it.isEnabled }.distinctBy { it.id }.sortedBy { it.rank }
+            .map { MenuShortcut(it.id, it.shortLabel?.toString() ?: it.id) }
+    }.getOrDefault(emptyList())
 
 fun launchSheetEntry(context: Context, state: AppSheetState, entry: SheetEntry, openApp: (String) -> Unit) {
     if (state.closing) return
     runCatching {
         if (entry.shortcutId == null) openApp(entry.pkg)
         else {
-            val launcher = checkNotNull(context.getSystemService(LauncherApps::class.java))
-            launcher.startShortcut(entry.pkg, entry.shortcutId, null, null, Process.myUserHandle())
-            state.store.launched(entry.pkg)
+            // The same handoff as Home's app tap: a screen parked on this app comes back first, then the shortcut opens (it counts as a launch there).
+            val toast = { Toast.makeText(context, "Couldn't open ${entry.name}", Toast.LENGTH_SHORT).show() }
+            com.misura.phone.MisuraGraph.scope.launch {
+                val opened = runCatching { com.misura.phone.MisuraGraph.openTarget(context, com.misura.core.shortcut.Target.AppShortcut(entry.pkg, entry.shortcutId)) }.getOrDefault(false)
+                if (!opened) kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { toast() }
+            }
         }
     }.onFailure { Toast.makeText(context, "Couldn't open ${entry.name}", Toast.LENGTH_SHORT).show() }
     state.close()
 }
 
 @Composable
-private fun AppMenu(entry: SheetEntry, shortcuts: List<ShortcutInfo>, pinned: Boolean, onDismiss: () -> Unit,
-    onShortcut: (ShortcutInfo) -> Unit, onPin: () -> Unit) {
+private fun AppMenu(entry: SheetEntry, shortcuts: List<MenuShortcut>, pinned: Boolean, home: SheetHome?, keptAtOpen: List<com.misura.core.shortcut.Shortcut>,
+    onDismiss: () -> Unit, onShortcut: (MenuShortcut) -> Unit, onPin: () -> Unit) {
     val context = LocalContext.current
-    val margin = with(LocalDensity.current) { 16.dp.roundToPx() }
-    val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
-    val position = remember(margin, gap) { object : PopupPositionProvider {
-        override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset =
-            IntOffset(margin, (anchorBounds.top - popupContentSize.height - gap)
-                .coerceIn(margin, maxOf(margin, windowSize.height - popupContentSize.height - margin)))
-    } }
-    val scroll = androidx.compose.foundation.rememberScrollState()
-    Popup(popupPositionProvider = position, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
-        Column(Modifier.width((LocalConfiguration.current.screenWidthDp.dp - 88.dp).coerceAtLeast(160.dp))
-            .heightIn(max = 360.dp).shadow(18.dp, RoundedCornerShape(14.dp)).background(M.surface, RoundedCornerShape(14.dp))
-            .verticalScroll(scroll).padding(vertical = 6.dp)) {
-            shortcuts.forEach { shortcut -> MenuItem(shortcut.shortLabel?.toString() ?: shortcut.id) { onShortcut(shortcut) } }
-            if (shortcuts.isNotEmpty()) Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(M.outline.copy(alpha = .2f)))
+    // Pinned to Main: after the IO work the state writes must never resume on the IO thread (the compose test interceptor would let them).
+    val scope = androidx.compose.runtime.rememberCoroutineScope { kotlinx.coroutines.Dispatchers.Main }
+    val menu = remember(home, entry.key) { home?.let { HomeMenuState(it, scope, entry.pkg, entry.name, shortcuts, keptAtOpen) } }
+    MenuPopup(onDismiss, footer = menu?.let { m -> { HomeMenuStatus(m) } }) {
+        if (menu?.picking != null) HomePicker(menu)
+        else {
+            val list = menu?.shortcuts ?: shortcuts
+            list.forEach { shortcut ->
+                if (menu == null) MenuItem(shortcut.label) { onShortcut(shortcut) }
+                else {
+                    val target = com.misura.core.shortcut.Target.AppShortcut(entry.pkg, shortcut.id)
+                    val on = menu.keptFor(target) != null
+                    SplitMenuRow(shortcut.label, on, onOpen = { onShortcut(shortcut) }, onToggle = { if (on) menu.remove(target) else menu.addShortcut(shortcut) })
+                }
+            }
+            if (list.isNotEmpty()) Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(M.outline.copy(alpha = .2f)))
+            if (menu != null && !entry.made) {
+                val app = com.misura.core.shortcut.Target.App(entry.pkg)
+                val on = menu.keptFor(app) != null
+                MenuItem(if (on) "On Home · remove" else "Add to Home") { if (on) menu.remove(app) else menu.addApp() }
+            }
             MenuItem(if (pinned) "Unpin" else "Pin", secondary = true, onClick = onPin)
             MenuItem("App info", secondary = true) {
                 runCatching { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
@@ -299,8 +326,34 @@ private fun AppMenu(entry: SheetEntry, shortcuts: List<ShortcutInfo>, pinned: Bo
     }
 }
 
+/** The menu's popup: above its anchor, one rounded surface (the app menu's look); Home's line menu reuses it. */
 @Composable
-private fun MenuItem(label: String, secondary: Boolean = false, onClick: () -> Unit) {
+internal fun MenuPopup(onDismiss: () -> Unit, footer: (@Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit)? = null,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    val margin = with(LocalDensity.current) { 16.dp.roundToPx() }
+    val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
+    val position = remember(margin, gap) { object : PopupPositionProvider {
+        override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset =
+            IntOffset(margin, (anchorBounds.top - popupContentSize.height - gap)
+                .coerceIn(margin, maxOf(margin, windowSize.height - popupContentSize.height - margin)))
+    } }
+    val scroll = androidx.compose.foundation.rememberScrollState()
+    Popup(popupPositionProvider = position, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true)) {
+        val frame = Modifier.width((LocalConfiguration.current.screenWidthDp.dp - 88.dp).coerceAtLeast(160.dp))
+            .heightIn(max = 360.dp).shadow(18.dp, RoundedCornerShape(14.dp)).background(M.surface, RoundedCornerShape(14.dp))
+        if (footer == null) {
+            // The frozen legacy menu: scroll first, padding inside it (unchanged since before the Home shortcuts menu).
+            Column(frame.verticalScroll(scroll).padding(vertical = 6.dp), content = content)
+        } else Column(frame.padding(vertical = 6.dp)) {
+            // Rows scroll; the footer (status) stays outside them, so it is never clipped out of the accessibility tree.
+            Column(Modifier.weight(1f, fill = false).verticalScroll(scroll), content = content)
+            footer.invoke(this)
+        }
+    }
+}
+
+@Composable
+internal fun MenuItem(label: String, secondary: Boolean = false, onClick: () -> Unit) {
     Text(label, style = ST.step.copy(fontSize = 16.sp), color = if (secondary) M.text2 else M.text,
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp))

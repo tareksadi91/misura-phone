@@ -33,7 +33,7 @@ class SettledTest {
 
     @Test fun anAnswerSettlesOnceWithTheSavedResult() = runTest {
         val r = run(ScriptedBrain(text("Hornbach closes at 20:00.")))
-        val id = r.agent.start("when does hornbach close"); advanceUntilIdle()
+        val id = r.agent.start("when does hornbach close", TurnOrigin.OWNER); advanceUntilIdle()
         r.settled.size shouldBe 1
         r.settled.single().let { it.id shouldBe id; it.status shouldBe SessionStatus.IDLE; it.say shouldBe Say.Answer("Hornbach closes at 20:00.") }
         r.settled.single() shouldBe r.store.load(id)
@@ -41,14 +41,14 @@ class SettledTest {
 
     @Test fun aWaitingDraftSettlesAsAnApprovalAndIsNotAllSent() = runTest {
         val r = run(ScriptedBrain(Calls(listOf(draft("NeighborB")))))
-        r.agent.start("say hi to NeighborB"); advanceUntilIdle()
+        r.agent.start("say hi to NeighborB", TurnOrigin.OWNER); advanceUntilIdle()
         r.settled.single().say.shouldBeInstanceOf<Say.Approve>()
         r.allSent shouldBe emptyList()
     }
 
     @Test fun aFinishedCardIsAllSentOnlyOnceEveryMessageWent() = runTest {
         val r = run(ScriptedBrain(Calls(listOf(draft("NeighborB"), draft("Guest")))))
-        val id = r.agent.start("say hi to NeighborB and Guest"); advanceUntilIdle()
+        val id = r.agent.start("say hi to NeighborB and Guest", TurnOrigin.OWNER); advanceUntilIdle()
         val sent = mutableSetOf<String>()
         sent += "task-1"; r.agent.taskSent("task-1") { it in sent }; advanceUntilIdle()
         r.allSent shouldBe emptyList()
@@ -59,7 +59,7 @@ class SettledTest {
     @Test fun aListWithMoreToDoCarriesOnInsteadOfAllSent() = runTest {
         val brain = ScriptedBrain(Calls(listOf(draft("NeighborB", more = true))), Calls(listOf(draft("Guest"))))
         val r = run(brain)
-        val id = r.agent.start("say hi to NeighborB, then Guest"); advanceUntilIdle()
+        val id = r.agent.start("say hi to NeighborB, then Guest", TurnOrigin.OWNER); advanceUntilIdle()
         r.agent.taskSent("task-1"); advanceUntilIdle()
         r.allSent shouldBe emptyList()
         r.store.load(id)!!.say shouldBe Say.Approve("task-2", "Guest", "Testchat")
@@ -67,14 +67,14 @@ class SettledTest {
 
     @Test fun anUnknownTaskIsNeverAllSent() = runTest {
         val r = run(ScriptedBrain(Calls(listOf(draft("NeighborB")))))
-        r.agent.start("say hi to NeighborB"); advanceUntilIdle()
+        r.agent.start("say hi to NeighborB", TurnOrigin.OWNER); advanceUntilIdle()
         r.agent.taskSent("someone-else"); advanceUntilIdle()
         r.allSent shouldBe emptyList()
     }
 
     @Test fun aFailingAlertNeverBreaksTheWork() = runTest {
         val r = run(ScriptedBrain(text("first"), text("second"), Calls(listOf(draft("NeighborB")))), throwing = true)
-        val id = r.agent.start("one"); advanceUntilIdle()
+        val id = r.agent.start("one", TurnOrigin.OWNER); advanceUntilIdle()
         r.store.load(id)!!.let { it.status shouldBe SessionStatus.IDLE; it.say shouldBe Say.Answer("first") }
         r.agent.followUp(id, "two"); advanceUntilIdle()
         r.store.load(id)!!.say shouldBe Say.Answer("second")
@@ -86,20 +86,20 @@ class SettledTest {
 
     @Test fun dismissDeleteAndFailureAreReportedSoStaleAlertsGo() = runTest {
         val r = run(ScriptedBrain(Calls(listOf(draft("NeighborB"))), text("kept"), { error("model down") }))
-        val a = r.agent.start("say hi to NeighborB"); advanceUntilIdle()
+        val a = r.agent.start("say hi to NeighborB", TurnOrigin.OWNER); advanceUntilIdle()
         r.agent.dismiss(a).await()
         r.settled.last().let { it.id shouldBe a; (it.dismissedAt != null) shouldBe true }
-        val b = r.agent.start("keep"); advanceUntilIdle()
+        val b = r.agent.start("keep", TurnOrigin.OWNER); advanceUntilIdle()
         r.agent.delete(b).await()
         r.settled.last().id shouldBe b
         r.store.load(b) shouldBe null
-        val c = r.agent.start("fails"); advanceUntilIdle()
+        val c = r.agent.start("fails", TurnOrigin.OWNER); advanceUntilIdle()
         r.settled.last().let { it.id shouldBe c; it.status shouldBe SessionStatus.FAILED }
     }
 
     @Test fun aDismissedFinishedCardIsNeverAnnouncedAsSent() = runTest {
         val r = run(ScriptedBrain(Calls(listOf(draft("NeighborB")))))
-        val id = r.agent.start("say hi to NeighborB"); advanceUntilIdle()
+        val id = r.agent.start("say hi to NeighborB", TurnOrigin.OWNER); advanceUntilIdle()
         r.agent.dismiss(id).await()
         r.agent.taskSent("task-1"); advanceUntilIdle()
         r.allSent shouldBe emptyList()

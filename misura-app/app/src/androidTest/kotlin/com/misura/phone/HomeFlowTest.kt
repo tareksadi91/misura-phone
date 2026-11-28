@@ -291,10 +291,12 @@ class HomeFlowTest {
         rule.onNodeWithText("Swipe down for apps").assertIsDisplayed()
         runBlocking { store.save(s.copy(revision = 1, say = com.misura.core.agent.Say.Question("Which park?", listOf("North", "South")))) }
         rule.waitUntil(5_000) { rule.onAllNodes(androidx.compose.ui.test.hasContentDescription("ready for your go", substring = true)).fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("What should we do?").assertDoesNotExist()
+        // The headline goes; the field's placeholder now asks the same (Home shortcuts spec, Home 2).
+        val headline = hasText("What should we do?") and !hasSetTextAction() and !androidx.compose.ui.test.hasAnyAncestor(hasSetTextAction())
+        rule.onAllNodes(headline).assertCountEquals(0)
         rule.onNodeWithText("Swipe down for apps").assertDoesNotExist()
         runBlocking { store.save(s.copy(revision = 2, say = com.misura.core.agent.Say.Answer("Done."))) }
-        waitText("What should we do?")
+        rule.waitUntil(8_000) { rule.onAllNodes(headline).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Swipe down for apps").assertIsDisplayed()
         rule.onNodeWithText(EARLIER).assertIsDisplayed()
     }

@@ -36,6 +36,12 @@ object MisuraGraph {
     lateinit var controller: Controller; private set
     lateinit var router: Router; private set
     lateinit var agent: Agent; private set
+    /** Kept Home shortcuts: one store, shared by the shortcut tool and Home. */
+    lateinit var shortcuts: com.misura.phone.shortcut.ShortcutStore; private set
+    /** The one owner of every shortcut mutation (store write + pins). */
+    lateinit var shortcutKeeper: com.misura.phone.shortcut.ShortcutKeeper; private set
+    /** The launcher's published shortcuts and target checks (the app list's Home items). */
+    lateinit var shortcutTargets: com.misura.phone.shortcut.ShortcutTargets; private set
     private lateinit var credentials: com.misura.phone.setup.CredentialSettings
     /** Place photos sized for the 3a's cards. */
     val photoLoader: com.misura.phone.screen.PhotoLoader = { place, photo ->
@@ -51,6 +57,17 @@ object MisuraGraph {
     @Volatile private var parkedApp: suspend (String) -> Unit = {}
     /** Open an app: a screen parked on it comes to the main screen instead of the app being launched again (see UseApp.bringParked). */
     @Volatile var bringParked: suspend (String) -> Boolean = { false }
+
+    /** Starts an app's launch screen for [openTarget]; a seam so a test can make the launch fail (debug builds only; the setter is a no-op in release). */
+    @Volatile internal var appOpener: (Context, String) -> Boolean = { c, p -> com.misura.phone.hands.openApp(c, p) }
+        set(v) { if (BuildConfig.DEBUG) field = v } // release dispatch stays bound to the real opener
+
+    /**
+     * Opens a shortcut's direct target for the user (Home tap, app sheet): the parked-screen handoff first, then the destination. Never touches the
+     * approval gate or the controller, so opening cannot consume or answer a pending approval. False = it did not open.
+     */
+    suspend fun openTarget(ctx: Context, target: com.misura.core.shortcut.Target): Boolean =
+        com.misura.phone.shortcut.ShortcutLauncher(ctx, openApp = appOpener).open(target) { bringParked(it) }
 
     /** Resolves the handler first and pins it, so a protected app is never the one that opens; Android's chooser is left to the owner. */
     internal fun openDirections(app: Context, url: String) {
@@ -101,24 +118,34 @@ object MisuraGraph {
         // ponytail: a fixed sum; a real fix would give the hand the time that is left.
         val (alertSettled, allSent) = com.misura.phone.notify.SessionAlerts.hooks(app, sessions, scope) { ids ->
             ids.all { tasks.load(it)?.state == com.misura.core.task.TaskState.NEEDS_APPROVAL } }
-        com.misura.phone.routine.Routines.init(app, start = { text, deny -> agent.start(text, deny) })
+        com.misura.phone.routine.Routines.init(app, start = { text, origin, deny -> agent.start(text, origin, deny) })
         val settled = { s: com.misura.core.agent.Session -> alertSettled(s); com.misura.phone.routine.Routines.settled(s) }
         val routineTool = com.misura.phone.routine.RoutineTool(com.misura.phone.routine.Routines.store, changed = { com.misura.phone.routine.Routines.resync() },
             runNow = { r -> com.misura.phone.routine.Routines.run(r, manual = true) }, launch = { work -> scope.launch { work() } })
-        agent = Agent(sessions, ConfiguredBrain, listOf(com.misura.phone.notify.ReadNotifications(app), places, lookup, com.misura.phone.brain.Remember(brainPrefs), useApp, com.misura.phone.hands.OpenApp(app, { apps }) { bringParked(it) }, calendar, com.misura.phone.hands.Contacts(app), com.misura.core.agent.Directions({ url -> openDirections(app, url) }), routineTool), System::currentTimeMillis, scope, turnTimeoutMs = 300_000, callTimeoutMs = 60_000, // the call after a long app run carries its items and was timing out at 30 s on a slow evening
+        val appLabel = { pkg: String -> runCatching { app.packageManager.getApplicationLabel(app.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg) }
+        // Steps as Home shows them (a send follows its task), so only a confirmed send counts as a run that worked.
+        shortcuts = com.misura.phone.shortcut.ShortcutStore(app)
+        val shortcutLauncher = com.misura.phone.shortcut.ShortcutLauncher(app)
+        shortcutKeeper = com.misura.phone.shortcut.ShortcutKeeper(shortcuts, pins = shortcutLauncher)
+        shortcutTargets = shortcutLauncher
+        // A Spotify link counts only from the owner's own words in that conversation: turns stored with origin OWNER (never a saved
+        // shortcut's or routine's prompt, a debug ask, a card tap or a tool result stored as "user").
+        val shortcutTool = com.misura.phone.shortcut.ShortcutTool(shortcuts, shortcutKeeper,
+            com.misura.phone.shortcut.controllerSteps(sessions, tasks::load, controller::isChecking), appLabel,
+            targets = shortcutLauncher, ownerWords = { id -> com.misura.core.agent.ownerUtterances(sessions.turns(id)) }, installedApps = { apps })
+        val gates = cardGates(calendar, routineTool, shortcutTool, useApp)
+        agent = Agent(sessions, ConfiguredBrain, listOf(com.misura.phone.notify.ReadNotifications(app), places, lookup, com.misura.phone.brain.Remember(brainPrefs), useApp, com.misura.phone.hands.OpenApp(app, { apps }) { bringParked(it) }, calendar, com.misura.phone.hands.Contacts(app), com.misura.core.agent.Directions({ url -> openDirections(app, url) }), routineTool, shortcutTool), System::currentTimeMillis, scope, turnTimeoutMs = 300_000, callTimeoutMs = 60_000, // the call after a long app run carries its items and was timing out at 30 s on a slow evening
             turnContext = routes::capture,
             onSettled = settled, onAllSent = allSent, // result / needs-you alerts (SYSTEM §5 M3)
             unavailableTools = { if (ModelRouteContext.current().route.googleAvailable) emptySet() else setOf("find_places", "show_places", "directions") },
-            // Route to the card's owner: use_app's no also drops its parked screen.
-            onChoose = { q, i -> q.gate?.let { when { it.startsWith("cal:") -> calendar.answered(it, yes = i == 0); it.startsWith("rt:") -> routineTool.answered(it, yes = i == 0); else -> useApp.answered(it, yes = i == 0) } } },
-            onStopped = { calendar.stopped(); useApp.stopped(); routineTool.stopped() },
-            chooseNote = { q, _ -> q.gate?.takeIf { it.startsWith("rt:") }?.let { routineTool.outcome(it) } },
+            // Route to the card's owner by its id prefix (CardGates): use_app's no also drops its parked screen.
+            onChoose = gates.onChoose, onStopped = gates.onStopped, chooseNote = gates.chooseNote,
             // Who the user is: their own briefing when one was put on the phone, else the built-in lines.
             about = { com.misura.phone.brain.aboutWithNotes(brainPrefs.privateString(com.misura.phone.debug.ABOUT_KEY), com.misura.phone.brain.notes(brainPrefs)) },
             device = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}, Android ${android.os.Build.VERSION.RELEASE}",
             onProblem = { s, why -> ProblemAlert.showSession(app, s.id, why) }, onStep = { if (BuildConfig.DEBUG || (BuildConfig.DIAGNOSTICS && " failed: " !in it)) android.util.Log.i("MisuraAgent", it) }, // fast builds: counts and timings only (failure lines can carry error text)
             drafter = com.misura.phone.hands.ChatDrafter({ MisuraListener.instance?.chatsAll().orEmpty() },
-                { pkg -> runCatching { app.packageManager.getApplicationLabel(app.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg) },
+                appLabel,
                 tasks, controller, System::currentTimeMillis, { MisuraListener.instance?.chatPackages().orEmpty() }, installedApps = { apps }))
         // A list moves on wherever you are: the next message is drafted while you're on home, and its row says who it's for.
         controller.onSent = { t -> scope.launch { agent.taskSent(t.id) { id -> tasks.load(id)?.state.let { it == com.misura.core.task.TaskState.DONE || it == com.misura.core.task.TaskState.WAITING } } } }

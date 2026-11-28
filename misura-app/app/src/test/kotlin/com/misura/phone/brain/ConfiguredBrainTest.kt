@@ -1,5 +1,6 @@
 package com.misura.phone.brain
 
+import com.misura.core.agent.TurnOrigin
 import com.misura.core.agent.*
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
@@ -53,7 +54,7 @@ class ConfiguredBrainTest {
             }
             val store = Store()
             val agent = Agent(store, brain, listOf(routed), System::currentTimeMillis, this, turnContext = { context })
-            val id = agent.start("public fixture")
+            val id = agent.start("public fixture", TurnOrigin.OWNER)
             withTimeout(5000) { while (store.load(id)?.status == SessionStatus.THINKING) delay(10) }
             assertEquals(SessionStatus.IDLE, store.load(id)?.status)
             if (places) {
@@ -94,7 +95,7 @@ class ConfiguredBrainTest {
             }
             val store = Store()
             val agent = Agent(store, brain, listOf(routed), System::currentTimeMillis, this, turnContext = { context })
-            val id = agent.start("cafes near me")
+            val id = agent.start("cafes near me", TurnOrigin.OWNER)
             withTimeout(5000) { while (store.load(id)?.status == SessionStatus.THINKING) delay(10) }
             assertEquals(SessionStatus.IDLE, store.load(id)?.status)
             val search = Json.parseToJsonElement(http.requests.first { it.method == "POST" }.body).jsonObject
@@ -150,7 +151,7 @@ class ConfiguredBrainTest {
             val steps = mutableListOf<String>()
             val agent = Agent(store, ConfiguredBrain, listOf(nested), System::currentTimeMillis, this,
                 onStep = { steps.add(it) }, turnContext = routes::capture)
-            val id = agent.start("fixture")
+            val id = agent.start("fixture", TurnOrigin.OWNER)
             withTimeout(5_000) { while (store.load(id)?.status == SessionStatus.THINKING) delay(10) }
             assertEquals(SessionStatus.IDLE, store.load(id)?.status)
             agent.followUp(id, "next fixture").join()
@@ -203,7 +204,7 @@ class ConfiguredBrainTest {
                 val store = Store()
                 val agent = Agent(store, ConfiguredBrain, listOf(memory), System::currentTimeMillis, this,
                     about = { "private briefing fixture" }, turnContext = { captured })
-                val id = agent.start("Remember this fixture")
+                val id = agent.start("Remember this fixture", TurnOrigin.OWNER)
                 withTimeout(5_000) { while (store.load(id)?.status == SessionStatus.THINKING) delay(10) }
                 assertEquals(provider.name, listOf("authorized"), notes)
                 agent.followUp(id, "Next fixture").join()

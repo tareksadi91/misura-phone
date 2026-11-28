@@ -1,5 +1,6 @@
 package com.misura.phone.brain
 
+import com.misura.core.agent.TurnOrigin
 import com.misura.core.agent.Agent
 import com.misura.core.agent.Say
 import com.misura.core.agent.Session
@@ -49,7 +50,7 @@ class LiveEval {
 
     @Test fun bibimbapShowsPlacesWithAPickThenHoursWithoutASecondSearch() = runBlocking<Unit> {
         assumeTrue("set MISURA_TOKEN and PROJECT", token.isNotBlank() && !System.getenv("PROJECT").isNullOrBlank())
-        val id = agent.start("best bibimbap in Kreuzberg")
+        val id = agent.start("best bibimbap in Kreuzberg", TurnOrigin.OWNER)
         val first = settle(id)
         println("1) ${first.status} tools=${toolsUsed(id)} places=${first.places} say=${first.say}")
         first.steps.forEach { println("   step: ${it.state} ${it.label} → ${it.result}") }
@@ -71,7 +72,7 @@ class LiveEval {
 
     @Test fun plainQuestion() = runBlocking<Unit> {
         assumeTrue("set MISURA_TOKEN and PROJECT", token.isNotBlank() && !System.getenv("PROJECT").isNullOrBlank())
-        val id = agent.start("what time does Markthalle Neun close on Saturday?")
+        val id = agent.start("what time does Markthalle Neun close on Saturday?", TurnOrigin.OWNER)
         val s = settle(id)
         println("6) ${s.status} tools=${toolsUsed(id)} say=${s.say}")
         check(s.status == SessionStatus.IDLE) { "status ${s.status}" }

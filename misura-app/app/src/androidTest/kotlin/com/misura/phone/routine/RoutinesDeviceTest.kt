@@ -1,5 +1,6 @@
 package com.misura.phone.routine
 
+import com.misura.core.agent.TurnOrigin
 import android.app.NotificationManager
 import androidx.test.platform.app.InstrumentationRegistry
 import com.misura.core.agent.Agent
@@ -63,13 +64,13 @@ class RoutinesDeviceTest {
         override fun summary(result: JsonObject): String? = null
     }
     private val starts = AtomicInteger()
-    private fun agent(tool: RoutineTool, vararg replies: () -> BrainReply): Agent {
+    private fun agent(tool: RoutineTool, vararg replies: () -> BrainReply, extra: List<Tool> = emptyList()): Agent {
         val (alerts, allSent) = SessionAlerts.hooks(ctx, sessions, scope)
         lateinit var a: Agent
-        a = Agent(sessions, Script(*replies), listOf(hand, tool), System::currentTimeMillis, scope,
+        a = Agent(sessions, Script(*replies), listOf(hand, tool) + extra, System::currentTimeMillis, scope,
             onChoose = { q, i -> q.gate?.let { if (it.startsWith("rt:")) tool.answered(it, yes = i == 0) } },
             onSettled = { s -> alerts(s); Routines.settled(s) }, onAllSent = allSent)
-        Routines.init(ctx, start = { t, deny -> starts.incrementAndGet(); a.start(t, deny) }, store = store)
+        Routines.init(ctx, start = { t, origin, deny -> starts.incrementAndGet(); a.start(t, origin, deny) }, store = store)
         return a
     }
     private fun shell(cmd: String) = String(inst.uiAutomation.executeShellCommand(cmd).use { android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes() })
@@ -104,7 +105,7 @@ class RoutinesDeviceTest {
         val add = """{"action":"add","title":"Train","time":"08:00","days":"weekdays","prompt":"Is my train late?"}"""
         val tool = RoutineTool(store, changed = { Routines.resync() })
         val a = agent(tool, call("routine", add), text("Saved.")) // after the tap the model only confirms (as on the phone, 22 Nov)
-        val id = a.start("every weekday at 8 check if my train is late")
+        val id = a.start("every weekday at 8 check if my train is late", TurnOrigin.OWNER)
         waitFor(5_000) { runBlocking { sessions.load(id)?.status == SessionStatus.IDLE } } shouldBe true
         val card = sessions.load(id)!!.say as Say.Question
         (card.gate!!.startsWith("rt:")) shouldBe true
@@ -133,6 +134,33 @@ class RoutinesDeviceTest {
         starts.get() shouldBe 1
         store.all().single().routine.lastSession shouldBe session
         r.id shouldBe store.all().single().routine.id
+    }
+
+    /** The real shortcut tool, wired as MisuraGraph wires it: the link check reads the owner's utterances from this session's stored turns. */
+    private fun shortcutTool(shortcuts: com.misura.phone.shortcut.ShortcutStore) = com.misura.phone.shortcut.ShortcutTool(shortcuts,
+        com.misura.phone.shortcut.ShortcutKeeper(shortcuts, null), com.misura.phone.shortcut.controllerSteps(sessions, com.misura.phone.store.RoomTaskStore(db)::load) { false },
+        { it }, object : com.misura.phone.shortcut.ShortcutTargets {
+            override fun published(pkg: String) = emptyList<com.misura.phone.shortcut.ShortcutLauncher.Published>()
+            override fun resolve(target: com.misura.core.shortcut.Target) = true // Spotify is not on the emulator: the link check is what is under test
+            override fun installed(pkg: String) = true
+        }, ownerWords = { id -> com.misura.core.agent.ownerUtterances(sessions.turns(id)) })
+    private val link = "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
+    private val keepLink = """{"action":"add","title":"Focus","target":{"kind":"spotify","link":"$link"}}"""
+
+    /** Codex P1: a routine's saved prompt is not the owner's words of its run: a link only there can't make a shortcut. */
+    @Test fun aLinkOnlyInARoutinePromptIsNotTheOwners() = runBlocking<Unit> {
+        ctx.getSharedPreferences("shortcuts", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+        val shortcuts = com.misura.phone.shortcut.ShortcutStore(ctx)
+        try {
+            agent(RoutineTool(store), call("shortcut", keepLink), text("Not said."), extra = listOf(shortcutTool(shortcuts)))
+            due(minutesAgo = 1, prompt = "keep $link on Home")
+            Routines.tick()
+            val session = waitFor(5_000) { store.all().single().routine.lastSession != null }.let { store.all().single().routine.lastSession!! }
+            waitFor(8_000) { runBlocking { sessions.load(session)?.status == SessionStatus.IDLE } } shouldBe true
+            sessions.turns(session).toString().contains(com.misura.phone.shortcut.ShortcutTool.LINK_NOT_SAID) shouldBe true
+            (sessions.load(session)!!.say is Say.Question) shouldBe false
+            shortcuts.all() shouldBe emptyList()
+        } finally { ctx.getSharedPreferences("shortcuts", android.content.Context.MODE_PRIVATE).edit().clear().commit() }
     }
 
     @Test fun aLateOccurrenceIsSkippedNotRun() = runBlocking<Unit> {

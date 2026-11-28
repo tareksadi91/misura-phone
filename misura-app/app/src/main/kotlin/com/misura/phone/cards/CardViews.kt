@@ -53,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
@@ -232,7 +233,7 @@ fun Field(value: String, onChange: (String) -> Unit, hint: String, modifier: Mod
     val decoration: @Composable (@Composable () -> Unit) -> Unit = { inner ->
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             leading?.invoke()
-            Box(Modifier.weight(1f)) { if (value.isEmpty()) Text(hint, style = T.msg, color = M.text2); inner() }
+            Box(Modifier.weight(1f)) { if (value.isEmpty()) Text(hint, style = T.msg, color = M.text2, maxLines = 1, overflow = TextOverflow.Ellipsis); inner() }
         }
     }
     if (useStateField) {

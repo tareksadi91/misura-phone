@@ -86,20 +86,20 @@ class ItemsTest {
 
     @Test fun showItemsSetsItemsAndLineAndEndsTheTurn() = runTest {
         val (store, agent) = run(ScriptedBrain(call("use_app"), showI1()), FakeTool(useApp) { j(found) })
-        val id = agent.start("jackets on vinted"); advanceUntilIdle()
+        val id = agent.start("jackets on vinted", TurnOrigin.OWNER); advanceUntilIdle()
         val s = store.load(id)!!
         s.items shouldBe Items(listOf("i1", "i2"), "i1"); s.say shouldBe Say.Answer("The jacket"); s.places shouldBe null
         s.status shouldBe SessionStatus.IDLE
     }
     @Test fun findAndShowInOneReplyWorks() = runTest {
         val (store, agent) = run(ScriptedBrain(Calls(listOf(Triple("use_app", obj(), "a"), Triple("show_items", j("""{"itemIds":["i2"]}"""), "b")))), FakeTool(useApp) { j(found) })
-        val id = agent.start("x"); advanceUntilIdle()
+        val id = agent.start("x", TurnOrigin.OWNER); advanceUntilIdle()
         store.load(id)!!.items shouldBe Items(listOf("i2"), null)
     }
     @Test fun unknownItemIdIsRejectedLikePlaces() = runTest {
         val bad = call("show_items", j("""{"itemIds":["zzz"]}"""))
         val (store, agent) = run(ScriptedBrain(call("use_app"), bad, bad), FakeTool(useApp) { j(found) })
-        val id = agent.start("x"); advanceUntilIdle()
+        val id = agent.start("x", TurnOrigin.OWNER); advanceUntilIdle()
         store.load(id)!!.status shouldBe SessionStatus.FAILED
         store.load(id)!!.say.shouldBeInstanceOf<Say.Problem>()
         store.load(id)!!.items shouldBe null
@@ -108,7 +108,7 @@ class ItemsTest {
         val places = FakeTool(ToolSpec("find_places", "x", JsonObject(emptyMap()))) { twoPlaces }
         val showA = call("show_places", j("""{"placeIds":["A"]}"""))
         val (store, agent) = run(ScriptedBrain(call("find_places"), showA, call("use_app"), showI1(), showA), places, FakeTool(useApp) { j(found) })
-        val id = agent.start("x"); advanceUntilIdle()
+        val id = agent.start("x", TurnOrigin.OWNER); advanceUntilIdle()
         store.load(id)!!.let { it.places shouldBe Places(listOf("A"), "A"); it.items shouldBe null }
         agent.followUp(id, "and jackets"); advanceUntilIdle()
         store.load(id)!!.let { it.items shouldBe Items(listOf("i1", "i2"), "i1"); it.places shouldBe null }
@@ -117,13 +117,13 @@ class ItemsTest {
     }
     @Test fun theShowItemsLineCountsInTheThread() = runTest {
         val (store, agent) = run(ScriptedBrain(call("use_app"), showI1("This jacket")), FakeTool(useApp) { j(found) })
-        val id = agent.start("jackets"); advanceUntilIdle()
+        val id = agent.start("jackets", TurnOrigin.OWNER); advanceUntilIdle()
         thread(store.turns(id)) shouldBe listOf(Exchange(1, "jackets", "This jacket"))
     }
     @Test fun tappingACardOpensItAsATapNotAsTheUsersWords() = runTest {
         val brain = ScriptedBrain(call("use_app"), showI1("This jacket"))
         val (store, agent) = run(brain, FakeTool(useApp) { j(found) })
-        val id = agent.start("jackets"); advanceUntilIdle()
+        val id = agent.start("jackets", TurnOrigin.OWNER); advanceUntilIdle()
         agent.openItem(id, itemFacts(store.turns(id)).getValue("i1")); advanceUntilIdle()
         val tap = store.turns(id).last { it.role == "user" && (it.content["parts"] as JsonArray).any { p -> (p as JsonObject).containsKey("text") } }
         (tap.content["parts"] as JsonArray).map { ((it as JsonObject)["text"] as JsonPrimitive).content } shouldBe
@@ -137,7 +137,7 @@ class ItemsTest {
         val brain = ScriptedBrain(call("use_app"), showI1("This jacket")) // a third model call would fail the turn
         val asked = mutableListOf<JsonObject>()
         val (store, agent) = run(brain, FakeTool(useApp) { a -> asked += a; j(found) })
-        val id = agent.start("jackets"); advanceUntilIdle()
+        val id = agent.start("jackets", TurnOrigin.OWNER); advanceUntilIdle()
         agent.openItem(id, itemFacts(store.turns(id)).getValue("i1")); advanceUntilIdle()
         brain.seen.size shouldBe 2
         asked.size shouldBe 2
@@ -149,7 +149,7 @@ class ItemsTest {
         var n = 0
         val brain = ScriptedBrain(call("use_app"), showI1("This jacket"))
         val (store, agent) = run(brain, FakeTool(useApp) { if (n++ == 0) j(found) else j("""{"error":"the app closed"}""") })
-        val id = agent.start("jackets"); advanceUntilIdle()
+        val id = agent.start("jackets", TurnOrigin.OWNER); advanceUntilIdle()
         agent.openItem(id, itemFacts(store.turns(id)).getValue("i1")); advanceUntilIdle()
         brain.seen.size shouldBe 2
         store.load(id)!!.say shouldBe Say.Problem("Couldn't open it.")
@@ -161,7 +161,7 @@ class ItemsTest {
         val tool = object : Tool by delegate { override fun steer(text: String) = true }
         val brain = ScriptedBrain(call("use_app"), showI1("This jacket"), text("Shipping is 4 €."))
         val (store, agent) = run(brain, tool)
-        val id = agent.start("jackets"); advanceUntilIdle()
+        val id = agent.start("jackets", TurnOrigin.OWNER); advanceUntilIdle()
         agent.openItem(id, itemFacts(store.turns(id)).getValue("i1")); testScheduler.runCurrent()
         agent.followUp(id, "what is the shipping cost").join()
         gate.complete(Unit); advanceUntilIdle()
@@ -174,7 +174,7 @@ class ItemsTest {
         val noApp = """{"items":[{"id":"i1","title":"Blue jacket"},{"id":"i2","title":"Boots"}]}"""
         val brain = ScriptedBrain(call("use_app"), showI1("This jacket"), call("use_app"), text("Opened."))
         val (store, agent) = run(brain, FakeTool(useApp) { j(noApp) })
-        val id = agent.start("jackets"); advanceUntilIdle()
+        val id = agent.start("jackets", TurnOrigin.OWNER); advanceUntilIdle()
         agent.openItem(id, itemFacts(store.turns(id)).getValue("i1")); advanceUntilIdle()
         brain.seen.size shouldBe 4
         store.load(id)!!.say shouldBe Say.Answer("Opened.")
@@ -185,7 +185,7 @@ class ItemsTest {
         val both = Calls(listOf(Triple("show_items", j("""{"itemIds":["i1","i2"],"pick":"i1","line":"Found two before the sign-in."}"""), null),
             Triple("ask", j("""{"line":"Vinted wants you signed in. Open it?","choices":["Open Vinted to sign in","Not now"]}"""), null)))
         val (store, agent) = run(ScriptedBrain(call("use_app"), both), FakeTool(useApp) { wall })
-        val id = agent.start("jackets on vinted"); advanceUntilIdle()
+        val id = agent.start("jackets on vinted", TurnOrigin.OWNER); advanceUntilIdle()
         val s = store.load(id)!!
         s.items shouldBe Items(listOf("i1", "i2"), "i1")
         s.say.shouldBeInstanceOf<Say.Question>().choices shouldBe listOf("Open Vinted to sign in", "Not now")
@@ -194,7 +194,7 @@ class ItemsTest {
         var seen: String? = null
         val tool = FakeTool(useApp) { seen = kotlin.coroutines.coroutineContext[RunningFor]?.session; j(found) }
         val (_, agent) = run(ScriptedBrain(call("use_app"), text("ok")), tool)
-        val id = agent.start("jackets"); advanceUntilIdle()
+        val id = agent.start("jackets", TurnOrigin.OWNER); advanceUntilIdle()
         seen shouldBe id
     }
     @Test fun anIdThatCouldCarryTextIsNotAnItem() {
@@ -204,7 +204,7 @@ class ItemsTest {
     @Test fun aFollowUpNoteIdentifiesTheItemWithoutItsOutsideTitle() = runTest {
         val brain = ScriptedBrain(text("a"), text("b"))
         val (_, agent) = run(brain)
-        val id2 = agent.start("x"); advanceUntilIdle()
+        val id2 = agent.start("x", TurnOrigin.OWNER); advanceUntilIdle()
         agent.followUp(id2, "how much?", lookingAt = ItemFact("i1", "Blue jacket").looking()); advanceUntilIdle()
         brain.seen.last().last().content.toString().contains("(Looking at: item id i1)") shouldBe true
         brain.seen.last().last().content.toString().contains("Blue jacket") shouldBe false

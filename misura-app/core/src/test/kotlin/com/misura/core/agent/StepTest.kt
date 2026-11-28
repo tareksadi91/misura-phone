@@ -29,7 +29,7 @@ class StepTest {
 
     @Test fun toolCallMakesRunningThenDoneStep() = runTest {
         val r = agent(ScriptedBrain(call("find_places", q), text("ok")), search { places(2) })
-        val id = r.agent.start("x"); advanceUntilIdle()
+        val id = r.agent.start("x", TurnOrigin.OWNER); advanceUntilIdle()
         val st = r.store.load(id)!!.steps.single()
         st.label shouldBe "Searching bibimbap in Kreuzberg"
         st.state shouldBe StepState.DONE
@@ -53,7 +53,7 @@ class StepTest {
             override fun appFor(args: JsonObject) = (args["app"] as? JsonPrimitive)?.content
         }
         r = agent(ScriptedBrain(call("use_app", obj("app" to JsonPrimitive("com.clock"))), text("ok")), tool)
-        val id = r.agent.start("x"); advanceUntilIdle()
+        val id = r.agent.start("x", TurnOrigin.OWNER); advanceUntilIdle()
         during!!.state shouldBe StepState.RUNNING
         during!!.result shouldBe "Clock: tap “Alarm”"
         val st = r.store.load(id)!!.steps.single()
@@ -69,7 +69,7 @@ class StepTest {
             obj("stopped" to JsonPrimitive("before tapping"), "askUser" to obj("id" to JsonPrimitive("q1"), "line" to JsonPrimitive("Clock: tap “Delete”?"), "choices" to JsonArray(listOf(JsonPrimitive("Delete"), JsonPrimitive("Don't")))))
         }
         val agent = Agent(store, ScriptedBrain(Calls(listOf(Triple("use_app", JsonObject(emptyMap()), null), Triple("answer", obj("line" to JsonPrimitive("All done.")), null))), text("Left it.")), listOf(tool), clock = { testScheduler.currentTime }, scope = this, onChoose = { q, i -> chosen += q.gate to i })
-        val id = agent.start("delete my alarm"); advanceUntilIdle()
+        val id = agent.start("delete my alarm", TurnOrigin.OWNER); advanceUntilIdle()
         val s = store.load(id)!!
         s.say shouldBe Say.Question("Clock: tap “Delete”?", listOf("Delete", "Don't"), gate = "q1") // the answer in the same reply did not take the card's place
         s.status shouldBe SessionStatus.IDLE
@@ -82,13 +82,13 @@ class StepTest {
 
     @Test fun theModelsOwnAskIsNeverAGate() = runTest {
         val r = agent(ScriptedBrain(call("ask", obj("line" to JsonPrimitive("Go?"), "choices" to JsonArray(listOf(JsonPrimitive("Delete"), JsonPrimitive("Don't")))))))
-        val id = r.agent.start("x"); advanceUntilIdle()
+        val id = r.agent.start("x", TurnOrigin.OWNER); advanceUntilIdle()
         (r.store.load(id)!!.say as Say.Question).gate shouldBe null
     }
 
     @Test fun errorResultClosesStepAsFailed() = runTest {
         val r = agent(ScriptedBrain(call("find_places", q), text("sorry")), search { obj("error" to JsonPrimitive("quota exceeded\nmore")) })
-        val id = r.agent.start("x"); advanceUntilIdle()
+        val id = r.agent.start("x", TurnOrigin.OWNER); advanceUntilIdle()
         val st = r.store.load(id)!!.steps.single()
         st.state shouldBe StepState.FAILED
         st.result shouldBe "quota exceeded"
@@ -96,7 +96,7 @@ class StepTest {
 
     @Test fun toolExceptionClosesStepAsFailed() = runTest {
         val r = agent(ScriptedBrain(call("find_places", q)), search { throw IllegalStateException("boom") })
-        val id = r.agent.start("x"); advanceUntilIdle()
+        val id = r.agent.start("x", TurnOrigin.OWNER); advanceUntilIdle()
         val s = r.store.load(id)!!
         s.steps.first().state shouldBe StepState.FAILED
         s.status shouldBe SessionStatus.FAILED
@@ -104,7 +104,7 @@ class StepTest {
 
     @Test fun timeoutFailsOpenStepAndAddsSyntheticStep() = runTest {
         val r = agent(ScriptedBrain(call("find_places", q)), search { delay(200_000); places(1) })
-        val id = r.agent.start("x"); advanceUntilIdle()
+        val id = r.agent.start("x", TurnOrigin.OWNER); advanceUntilIdle()
         val steps = r.store.load(id)!!.steps
         steps.map { it.state } shouldBe listOf(StepState.FAILED, StepState.FAILED)
         steps[0].label shouldBe "Searching bibimbap in Kreuzberg"
@@ -123,20 +123,20 @@ class StepTest {
 
     @Test fun stepsCarryTurnIndex() = runTest {
         val r = agent(ScriptedBrain(call("find_places", q), text("a"), call("find_places", q), text("b")), search { places(1) })
-        val id = r.agent.start("x"); advanceUntilIdle()
+        val id = r.agent.start("x", TurnOrigin.OWNER); advanceUntilIdle()
         r.agent.followUp(id, "y"); advanceUntilIdle()
         r.store.load(id)!!.steps.map { it.turn } shouldBe listOf(1, 2)
     }
 
     @Test fun stepLabelsNeverLogged() = runTest {
         val r = agent(ScriptedBrain(call("find_places", q), text("ok")), search { places(1) })
-        r.agent.start("bibimbap in Kreuzberg"); advanceUntilIdle()
+        r.agent.start("bibimbap in Kreuzberg", TurnOrigin.OWNER); advanceUntilIdle()
         r.logs.forEach { it shouldNotContain "bibimbap" }
     }
 
     @Test fun backendErrorTextNeverShownOrLogged() = runTest {
         val r = agent(ScriptedBrain({ throw BrainError("400 bibimbap in Kreuzberg is invalid", code = "400") }))
-        val id = r.agent.start("bibimbap in Kreuzberg"); advanceUntilIdle()
+        val id = r.agent.start("bibimbap in Kreuzberg", TurnOrigin.OWNER); advanceUntilIdle()
         val s = r.store.load(id)!!
         val shown = listOf((s.say as Say.Problem).line) + s.steps.map { it.label + " " + it.result } + r.logs + r.problems
         shown.joinToString(" ") shouldContain "400"
@@ -145,7 +145,7 @@ class StepTest {
 
     @Test fun structuredErrorClosesStepAsFailed() = runTest {
         val r = agent(ScriptedBrain(call("find_places", q), text("sorry")), search { obj("error" to obj("message" to JsonPrimitive("quota exceeded"))) })
-        val id = r.agent.start("x"); advanceUntilIdle()
+        val id = r.agent.start("x", TurnOrigin.OWNER); advanceUntilIdle()
         val st = r.store.load(id)!!.steps.single()
         st.state shouldBe StepState.FAILED
         st.result shouldBe "quota exceeded"

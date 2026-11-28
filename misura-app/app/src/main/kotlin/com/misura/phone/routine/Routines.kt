@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.PowerManager
 import android.util.Log
 import com.misura.core.agent.Session
+import com.misura.core.agent.TurnOrigin
 import com.misura.core.routine.Decision
 import com.misura.core.routine.NextRun
 import com.misura.core.routine.Routine
@@ -74,9 +75,9 @@ object Routines {
     private val ticking = Mutex()
     private val scope get() = MisuraGraph.scope
 
-    /** [start] opens a session for a prompt with tools denied (the agent's start); a test passes its own agent. */
-    private lateinit var start: suspend (String, Set<String>) -> String
-    fun init(ctx: Context, start: suspend (String, Set<String>) -> String, store: RoutineStore = RoutineStore(ctx)) { app = ctx.applicationContext; this.store = store; this.start = start }
+    /** [start] opens a session for a prompt, with its origin and the tools denied (the agent's start); a test passes its own agent. */
+    private lateinit var start: suspend (String, TurnOrigin, Set<String>) -> String
+    fun init(ctx: Context, start: suspend (String, TurnOrigin, Set<String>) -> String, store: RoutineStore = RoutineStore(ctx)) { app = ctx.applicationContext; this.store = store; this.start = start }
 
     private fun now(): ZonedDateTime = ZonedDateTime.now(ZoneId.systemDefault())
 
@@ -131,7 +132,8 @@ object Routines {
             WorkingService.routineStarted(app); token.counted = true
             token.lock = app.getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "misura:routine").apply { acquire(WAKE_MS) }
             main.postDelayed({ end(token) }, WAKE_MS) // the deadline: whatever happens, the demand ends
-            val id = start(r.prompt, DENIED)
+            // A routine's prompt is saved text (possibly model-written), never the owner's words of this run.
+            val id = start(r.prompt, TurnOrigin.ROUTINE, DENIED)
             token.session = id
             // Atomic with settled(): either it sees the token, or we see that it already settled.
             val early = synchronized(handshake) { running[id] = token; recentlySettled.remove(id) }

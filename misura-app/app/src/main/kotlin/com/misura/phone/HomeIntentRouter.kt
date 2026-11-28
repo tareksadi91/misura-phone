@@ -7,10 +7,14 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlin.coroutines.coroutineContext
 
-/** Notification navigation only. A later tap or home gesture cancels a pending lookup. */
+/**
+ * Notification navigation only. A later tap or home gesture cancels a pending lookup. [received] runs synchronously the moment a
+ * Home, session or task intent arrives, before any lookup suspends (Home's navigation counter: a shortcut's late fallback yields to it).
+ */
 internal class HomeIntentRouter(
     private val scope: CoroutineScope,
     private val sessionForTask: suspend (String) -> String?,
+    private val received: () -> Unit = {},
     private val open: (String?) -> Unit,
 ) {
     private var lookup: Job? = null
@@ -22,6 +26,7 @@ internal class HomeIntentRouter(
         pendingTask = null
         val session = intent.getStringExtra("session")?.takeIf { it.isNotBlank() && it.length <= 256 }
         val task = intent.getStringExtra("task")?.takeIf { it.isNotBlank() && it.length <= 256 }
+        if (session != null || task != null || intent.hasCategory(Intent.CATEGORY_HOME)) received()
         when {
             session != null -> open(session)
             task != null -> {

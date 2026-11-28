@@ -17,10 +17,12 @@ class HomeActivity : ComponentActivity() {
     private var request by mutableStateOf<OpenRequest?>(null)
     /** Bumped by the system home gesture: Misura is the launcher, so "home" means close the task, show the clock. */
     private var homeTap by mutableStateOf(0L)
+    /** Home's navigation counter, shared with HomeScreen: an arriving Home/session/task intent bumps it at once, before any Compose effect. */
+    private val navEpoch = java.util.concurrent.atomic.AtomicInteger()
     private val navigation by lazy {
         HomeIntentRouter(lifecycleScope, { task ->
             withContext(Dispatchers.IO) { MisuraGraph.sessions.sessionForTask(task)?.id }
-        }) { session ->
+        }, received = { navEpoch.incrementAndGet() }) { session ->
             if (session != null) request = OpenRequest(session, System.nanoTime())
             else { request = null; homeTap = System.nanoTime() }
         }
@@ -43,12 +45,11 @@ class HomeActivity : ComponentActivity() {
         val g = MisuraGraph
         setContent {
             HomeScreen(g.agent, g.sessions, g.photoLoader, request, Sends(g.tasks, g.controller, g.scope), homeTap,
-                com.misura.phone.voice.AndroidVoice(this), appsProvider = { g.apps },
+                com.misura.phone.voice.AndroidVoice(this), appsProvider = { g.apps }, shortcutStore = g.shortcuts, shortcutKeeper = g.shortcutKeeper,
+                sheetHome = com.misura.phone.screen.SheetHome(g.shortcutKeeper, g.shortcuts, g.shortcutTargets),
+                openTarget = { t -> runCatching { g.openTarget(this@HomeActivity, t) }.getOrDefault(false) }, navEpoch = navEpoch,
                 onOpenSettings = { startActivity(Intent(this, com.misura.phone.setup.SetupActivity::class.java)) }) { pkg ->
-                g.scope.launch {
-                    if (g.bringParked(pkg)) com.misura.phone.store.Pins(this@HomeActivity).launched(pkg)
-                    else com.misura.phone.hands.openApp(this@HomeActivity, pkg)
-                }
+                g.scope.launch { g.openTarget(this@HomeActivity, com.misura.core.shortcut.Target.App(pkg)) }
             }
         }
     }

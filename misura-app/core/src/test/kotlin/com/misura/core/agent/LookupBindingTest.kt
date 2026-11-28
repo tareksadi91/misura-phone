@@ -21,7 +21,7 @@ class LookupBindingTest {
         val store = InMemorySessionStore()
         val brain = ScriptedBrain(call("look_up"), call("answer", args()), text("Plain."))
         val agent = Agent(store,brain,listOf(FakeTool(spec) { lookup() }),{ 0L },this)
-        val session = agent.start("Find the fact"); advanceUntilIdle()
+        val session = agent.start("Find the fact", TurnOrigin.OWNER); advanceUntilIdle()
         val reopened = Json.decodeFromString<Session>(Json.encodeToString(store.load(session)!!))
         reopened.say shouldBe exact
         val turns = Json.decodeFromString<List<Turn>>(Json.encodeToString(store.turns(session)))
@@ -35,7 +35,7 @@ class LookupBindingTest {
     @Test fun rawParaphraseAfterLookupCannotBecomeTheDisplayedOrReopenedAnswer() = runTest {
         val store = InMemorySessionStore()
         val agent = Agent(store, ScriptedBrain(call("look_up"),text("made up")),listOf(FakeTool(spec) { lookup() }),{0L},this)
-        val session = agent.start("Find a fact"); advanceUntilIdle()
+        val session = agent.start("Find a fact", TurnOrigin.OWNER); advanceUntilIdle()
         val visible = store.load(session)!!.say as Say.Answer
         (visible.line != "made up") shouldBe true
         visible.citations shouldBe emptyList()
@@ -65,7 +65,7 @@ class LookupBindingTest {
         val tool = FakeTool(ToolSpec("find_places","Find",schema())) { schema() }
         var disabled = setOf("find_places","show_places","directions")
         val agent = Agent(InMemorySessionStore(),brain,listOf(tool),{0L},this,unavailableTools = { disabled })
-        val session = agent.start("First"); advanceUntilIdle()
+        val session = agent.start("First", TurnOrigin.OWNER); advanceUntilIdle()
         tool.runs shouldBe 0
         names.all { "show_places" !in it && "find_places" !in it && "answer" in it } shouldBe true
         disabled = emptySet()

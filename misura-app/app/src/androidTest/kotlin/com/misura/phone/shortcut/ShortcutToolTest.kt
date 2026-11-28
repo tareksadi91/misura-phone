@@ -512,16 +512,16 @@ class ShortcutToolTest {
 
     @Test fun spotifyLinkParsedNotPassedThrough() = runBlocking<Unit> {
         val shared = "$link?si=a1b2c3&utm_source=copy-link"
-        // Not verbatim (query changed) → refused as not said; the owner's exact words pass that check and reach the template refusal
-        // (Spotify pages are off after the 27 Nov phone check started playback): no card either way.
-        val a = agent(call("shortcut", spotify("$link?si=zzz")), call("shortcut", spotify(shared)), text("Not yet."))
-        val s = a.start("keep $shared on Home.", TurnOrigin.OWNER)
-        noCard(s)
-        count(said(s), ShortcutTool.LINK_NOT_SAID) shouldBe 1
-        count(said(s), ShortcutTool.SPOTIFY_OFF) shouldBe 1
-        // The parser and the intent builder stay for a later link form: rebuilt from kind + id, no query, no si.
-        val t = com.misura.core.shortcut.parseSpotifyLink(shared)!!
-        t shouldBe Target.Link(LinkTemplate.SPOTIFY_PAGE, "playlist:$id22")
+        // Not verbatim (query changed) → refused; the owner's exact words → asked.
+        val a = agent(call("shortcut", spotify("$link?si=zzz")), call("shortcut", spotify(shared)), text("Asked."))
+        val s = settled(a.start("keep $shared on Home.", TurnOrigin.OWNER))
+        said(s.id) shouldContain ShortcutTool.LINK_NOT_SAID
+        val card = s.say as Say.Question
+        card.label shouldBe "Shortcut · Spotify"
+        card.line shouldBe "Opens Spotify · Playlist\nopen.spotify.com/playlist/$id22"
+        a.choose(s.id, 0, s.revision).await() shouldBe true
+        val t = store.all().single().target as Target.Link
+        t shouldBe Target.Link(LinkTemplate.SPOTIFY_PAGE, "playlist:$id22") // rebuilt from kind + id: no query, no si
         val i = launcher.linkIntent(t)!!
         i.`package` shouldBe SPOTIFY
         i.dataString shouldBe "spotify:playlist:$id22"
@@ -546,11 +546,12 @@ class ShortcutToolTest {
             count(said(id), "not an open.spotify.com playlist, album or artist link") shouldBe some.size
         }
         val hostile = "$link?si=x&next=spotify:track:evil%0Aintent://x&q=Approve-and-send"
-        val a = agent(call("shortcut", spotify(hostile)), text("Not yet."))
-        val s = a.start("keep $hostile", TurnOrigin.OWNER)
-        noCard(s) // past the parser and the owner check, then refused: Spotify pages are off for now
-        said(s).let { it shouldContain ShortcutTool.SPOTIFY_OFF; count(it, "not an open.spotify.com playlist, album or artist link") shouldBe 0 }
-        com.misura.core.shortcut.parseSpotifyLink(hostile) shouldBe Target.Link(LinkTemplate.SPOTIFY_PAGE, "playlist:$id22") // only kind + id survive
+        val a = agent(call("shortcut", spotify(hostile)), text("Asked."))
+        val s = settled(a.start("keep $hostile", TurnOrigin.OWNER))
+        val card = s.say as Say.Question // only the canonical one asks, and shows only kind + id
+        card.line shouldBe "Opens Spotify · Playlist\nopen.spotify.com/playlist/$id22"
+        a.choose(s.id, 0, s.revision).await() shouldBe true
+        store.all().single().target shouldBe Target.Link(LinkTemplate.SPOTIFY_PAGE, "playlist:$id22")
     }
 
     @Test fun routeOnlyHomeOrWork() = runBlocking<Unit> {
@@ -624,12 +625,12 @@ class ShortcutToolTest {
 
     /** Codex P1: retry sends the same words again with the same origin; owner words stay the owner's, a saved prompt stays not. */
     @Test fun retryKeepsOwnerOrigin() = runBlocking<Unit> {
-        val a = agent({ throw BrainError("x", code = "400") }, call("shortcut", spotify(link)), text("Not yet."))
+        val a = agent({ throw BrainError("x", code = "400") }, call("shortcut", spotify(link)), text("Asked."))
         val s = settled(a.start("keep $link on Home", TurnOrigin.OWNER))
         s.status shouldBe SessionStatus.FAILED
         a.retry(s.id).join()
-        // Still the owner's words: past the owner check, so only the (temporary) Spotify refusal answers.
-        noCard(s.id); said(s.id).let { it shouldContain ShortcutTool.SPOTIFY_OFF; it.contains(ShortcutTool.LINK_NOT_SAID) shouldBe false }
+        val again = settled(s.id)
+        (again.say as Say.Question).line shouldBe "Opens Spotify · Playlist\nopen.spotify.com/playlist/$id22"
         // The same link in a saved shortcut's prompt, tried again after a problem: still not the owner's words.
         val b = agent({ throw BrainError("x", code = "400") }, call("shortcut", spotify(link)), text("Not said."))
         val s2 = settled(b.start("keep $link on Home", TurnOrigin.SHORTCUT))

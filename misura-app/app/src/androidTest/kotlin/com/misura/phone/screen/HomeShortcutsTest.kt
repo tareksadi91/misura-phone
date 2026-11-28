@@ -546,20 +546,16 @@ class HomeShortcutsTest {
         store.all().map { it.title } shouldBe listOf("Focus") // only the one that was there
     }
 
-    /** The same link typed into Home's field is the owner's: it passes the owner check and only the (temporary) Spotify refusal answers, no card. */
+    /** The same link typed into Home's field is the owner's: the card is asked. */
     @Test fun linkTypedOnHomeIsTheOwners() {
-        val brain = Script(call("shortcut", keepLink), text("Not yet."))
+        val brain = Script(call("shortcut", keepLink), text("Asked."))
         show(Agent(sessions, brain, listOf(hand, shortcutTool(store)), System::currentTimeMillis, scope)); waitFor(headline)
         rule.onNodeWithContentDescription(ASK_FIELD).performTextInput("keep $link on Home")
         rule.onNode(hasText("Ask") and hasClickAction()).performClick()
         rule.waitUntil(8_000) { runBlocking { sessions.recent(5).isNotEmpty() } }
         val id = runBlocking { sessions.recent(5).single().id }
         rule.waitUntil(8_000) { runBlocking { sessions.load(id)?.status == SessionStatus.IDLE } }
-        val turns = runBlocking { sessions.turns(id) }.toString()
-        turns.contains(com.misura.phone.shortcut.ShortcutTool.SPOTIFY_OFF) shouldBe true
-        turns.contains(com.misura.phone.shortcut.ShortcutTool.LINK_NOT_SAID) shouldBe false
-        (runBlocking { sessions.load(id) }!!.say is Say.Question) shouldBe false
-        store.all() shouldBe emptyList()
+        (runBlocking { sessions.load(id) }!!.say as Say.Question).line shouldBe "Opens com.spotify.music · Playlist\nopen.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
     }
 
     @Test fun doubleTapStartsOneTask() {
